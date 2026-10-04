@@ -1,6 +1,6 @@
 [project]
 name = "arcade_ynab"
-version = "0.2.0"
+version = "0.3.0"
 description = "YNAB tools for agents, served as an Arcade MCP server"
 requires-python = ">=3.10"
 license = "MIT"

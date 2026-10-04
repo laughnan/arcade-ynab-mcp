@@ -18,7 +18,9 @@ API_PREFIX = "/v1"
 
 @dataclass
 class FakeYnab:
-    routes: dict[tuple[str, str], tuple[int, Any, dict[str, str]]] = field(default_factory=dict)
+    routes: dict[tuple[str, str, frozenset | None], tuple[int, Any, dict[str, str]]] = field(
+        default_factory=dict
+    )
     requests: list[httpx.Request] = field(default_factory=list)
 
     def add(
@@ -30,10 +32,16 @@ class FakeYnab:
         status: int = 200,
         body: Any = None,
         headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
     ) -> None:
-        """Register a response. ``data`` is wrapped as ``{"data": ...}``; ``body`` is sent as-is."""
+        """Register a response. ``data`` is wrapped as ``{"data": ...}``; ``body`` is sent as-is.
+
+        With ``params``, the route only matches requests with exactly those query params;
+        otherwise it matches any query string.
+        """
         payload = body if body is not None else {"data": data}
-        self.routes[(method.upper(), API_PREFIX + path)] = (status, payload, headers or {})
+        key = (method.upper(), API_PREFIX + path, frozenset(params.items()) if params else None)
+        self.routes[key] = (status, payload, headers or {})
 
     def error(self, method: str, path: str, status: int, error_id: str, detail: str) -> None:
         self.add(
@@ -45,13 +53,15 @@ class FakeYnab:
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
-        key = (request.method, request.url.path)
-        if key not in self.routes:
+        exact = (request.method, request.url.path, frozenset(request.url.params.items()))
+        fallback = (request.method, request.url.path, None)
+        route = self.routes.get(exact) or self.routes.get(fallback)
+        if route is None:
             return httpx.Response(
                 404,
-                json={"error": {"id": "404.1", "name": "not_found", "detail": f"no route {key}"}},
+                json={"error": {"id": "404.1", "name": "not_found", "detail": f"no route {exact}"}},
             )
-        status, payload, headers = self.routes[key]
+        status, payload, headers = route
         return httpx.Response(status, content=json.dumps(payload), headers=headers)
 
     @property
