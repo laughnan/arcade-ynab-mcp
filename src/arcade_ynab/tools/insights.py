@@ -49,6 +49,11 @@ def _money(milliunits: int) -> float:
 @tool(requires_auth=YNAB_AUTH, metadata=READ_ONLY)
 async def review_unapproved(
     context: Context,
+    since_date: Annotated[
+        str | None,
+        "Only include unapproved transactions on or after this date (YYYY-MM-DD). Defaults "
+        "to one year ago, YNAB's default.",
+    ] = None,
     history_days: Annotated[
         int, "How many days of approved transactions to learn payee categories from (7-365)."
     ] = 90,
@@ -59,10 +64,18 @@ async def review_unapproved(
     the same payee was categorized recently. Use UpdateTransactions to approve or
     recategorize them after the user confirms."""
     history_days = max(7, min(int(history_days), 365))
+    today = date.today()
+    # YNAB defaults since_date to one year ago; send it explicitly so the response can
+    # say how far back it looked.
+    inbox_since = (
+        validate_date(since_date, "since_date") or (today - timedelta(days=365)).isoformat()
+    )
     client = client_from_context(context)
-    unapproved_data = await client.get(plan_path(plan_id, "/transactions"), type="unapproved")
-    since = (date.today() - timedelta(days=history_days)).isoformat()
-    history_data = await client.get(plan_path(plan_id, "/transactions"), since_date=since)
+    unapproved_data = await client.get_list(
+        plan_path(plan_id, "/transactions"), type="unapproved", since_date=inbox_since
+    )
+    since = (today - timedelta(days=history_days)).isoformat()
+    history_data = await client.get_list(plan_path(plan_id, "/transactions"), since_date=since)
 
     votes: dict[str, Counter[tuple[str, str]]] = defaultdict(Counter)
     for t in shaping.live(history_data.get("transactions")):
@@ -83,7 +96,9 @@ async def review_unapproved(
     ):
         row = shaping.transaction(t)
         payee_votes = votes.get(t.get("payee_id") or "")
-        if payee_votes and not t.get("transfer_account_id"):
+        # Splits can't be recategorized as a whole, and transfers don't need a category.
+        is_split = bool(shaping.live(t.get("subtransactions")))
+        if payee_votes and not t.get("transfer_account_id") and not is_split:
             (category_id, category_name), count = payee_votes.most_common(1)[0]
             row["suggested_category"] = {
                 "id": category_id,
@@ -95,9 +110,14 @@ async def review_unapproved(
 
     kept, info = shaping.truncate(rows, clamp_limit(limit))
     return {
+        "since_date": inbox_since,
         "unapproved": kept,
         "uncategorized_count": sum(
-            1 for r in rows if not r.get("category_id") and not r.get("subtransactions")
+            1
+            for r in rows
+            if not r.get("category_id")
+            and not r.get("subtransactions")
+            and not r.get("transfer_account_id")
         ),
         **info,
     }
@@ -297,10 +317,12 @@ def _add_months(start: date, months: int) -> date:
     return date(year, month, min(start.day, calendar.monthrange(year, month)[1]))
 
 
-def occurrences(first: date, frequency: str, end: date) -> list[date]:
-    """Dates from ``first`` through ``end`` for a YNAB scheduled-transaction frequency.
+def occurrences(first: date, frequency: str, end: date, anchor: date | None = None) -> list[date]:
+    """Dates from ``first`` (the next occurrence) through ``end`` for a YNAB frequency.
 
-    ``twiceAMonth`` is approximated as the scheduled day and 15 days later each month.
+    ``anchor`` is the schedule's original date (``date_first``). It only matters for
+    ``twiceAMonth``, which isn't a constant interval: it's approximated as the anchor's day
+    and 15 days after it, repeating monthly. Other frequencies step from ``first``.
     """
     if first > end:
         return []
@@ -315,14 +337,13 @@ def occurrences(first: date, frequency: str, end: date) -> list[date]:
             current += step
         return dates
     if frequency == "twiceAMonth":
+        start = anchor if anchor and anchor <= first else first
+        halves = (start, start + timedelta(days=15))
         n = 0
-        while (base := _add_months(first, n)) <= end:
-            dates.append(base)
-            second = base + timedelta(days=15)
-            if second <= end and second.month == base.month:
-                dates.append(second)
+        while _add_months(start, n) <= end:
+            dates.extend(d for half in halves if first <= (d := _add_months(half, n)) <= end)
             n += 1
-        return dates
+        return sorted(dates)
     months = _STEP_MONTHS.get(frequency)
     if months is None:
         return [first]
@@ -367,7 +388,8 @@ async def forecast_cash_flow(
     events: dict[str, list[Raw]] = defaultdict(list)
     for s in shaping.live(scheduled_data.get("scheduled_transactions")):
         first = date.fromisoformat(s["date_next"])
-        for when in occurrences(first, s.get("frequency") or "never", end):
+        anchor = date.fromisoformat(s["date_first"]) if s.get("date_first") else None
+        for when in occurrences(first, s.get("frequency") or "never", end, anchor):
             if when < today:
                 continue
             legs: list[tuple[str, int]] = [(s.get("account_id") or "", s["amount"])]
@@ -390,10 +412,15 @@ async def forecast_cash_flow(
         balance = account.get("balance", 0)
         lowest, lowest_date = balance, today.isoformat()
         timeline = sorted(events.get(acct_id, []), key=lambda e: e["date"])
+        # Net each day's events before checking the low point, so the order YNAB lists
+        # same-day items in (e.g. a paycheck and a bill) doesn't create a false shortfall.
+        net_by_day: dict[str, int] = defaultdict(int)
         for event in timeline:
-            balance += event["amount"]
+            net_by_day[event["date"]] += event["amount"]
+        for day in sorted(net_by_day):
+            balance += net_by_day[day]
             if balance < lowest:
-                lowest, lowest_date = balance, event["date"]
+                lowest, lowest_date = balance, day
         forecasts.append(
             {
                 "account_id": acct_id,

@@ -2,23 +2,16 @@ from datetime import date
 
 import pytest
 from arcade_mcp_server.exceptions import RetryableToolError
-from conftest import make_account, make_category, make_transaction
+from conftest import FixedDate, make_account, make_category, make_transaction
 
 from arcade_ynab.tools import insights
 from arcade_ynab.tools.insights import GroupBy, occurrences
 
 PLAN = "/plans/last-used"
-TODAY = date(2026, 10, 4)
-
-
-class FixedDate(date):
-    @classmethod
-    def today(cls):
-        return cls(TODAY.year, TODAY.month, TODAY.day)
 
 
 @pytest.fixture(autouse=True)
-def fixed_today(monkeypatch):
+def fixed_insights_today(monkeypatch):
     monkeypatch.setattr(insights, "date", FixedDate)
 
 
@@ -40,9 +33,36 @@ async def test_review_unapproved_suggests_most_common_category(ynab, context):
                     category_id=None,
                     category_name=None,
                 ),
+                make_transaction(
+                    id="u3",
+                    approved=False,
+                    transfer_account_id="acct-savings",
+                    category_id=None,
+                    category_name=None,
+                ),
+                make_transaction(
+                    id="u4",
+                    approved=False,
+                    category_id=None,
+                    category_name="Split",
+                    subtransactions=[
+                        {
+                            "id": "s1",
+                            "amount": -20000,
+                            "category_id": "cat-groceries",
+                            "deleted": False,
+                        },
+                        {
+                            "id": "s2",
+                            "amount": -22500,
+                            "category_id": "cat-household",
+                            "deleted": False,
+                        },
+                    ],
+                ),
             ]
         },
-        params={"type": "unapproved"},
+        params={"type": "unapproved", "since_date": "2025-10-04"},
     )
     ynab.add(
         "GET",
@@ -62,10 +82,16 @@ async def test_review_unapproved_suggests_most_common_category(ynab, context):
     result = await insights.review_unapproved(context, history_days=30)
 
     params = [dict(r.url.params) for r in ynab.requests]
-    assert params == [{"type": "unapproved"}, {"since_date": "2026-09-04"}]
+    assert params == [
+        {"type": "unapproved", "since_date": "2025-10-04"},
+        {"since_date": "2026-09-04"},
+    ]
+    assert result["since_date"] == "2025-10-04"
     by_id = {t["id"]: t for t in result["unapproved"]}
-    assert set(by_id) == {"u1", "u2"}
-    assert "suggested_category" not in by_id["u2"]
+    assert set(by_id) == {"u1", "u2", "u3", "u4"}
+    assert "suggested_category" not in by_id["u2"]  # payee has no history
+    assert "suggested_category" not in by_id["u3"]  # transfer
+    assert "suggested_category" not in by_id["u4"]  # split
     assert by_id["u1"]["suggested_category"] == {
         "id": "cat-groceries",
         "name": "Groceries",
@@ -427,3 +453,65 @@ async def test_review_goals(ynab, context):
     assert car["needed_this_month"] == 150.0
     assert car["target"] == 6000.0
     assert car["target_date"] == "2027-06-01"
+
+
+async def test_review_unapproved_custom_since_and_empty_inbox(ynab, context):
+    ynab.error("GET", f"{PLAN}/transactions", 404, "404.2", "No transactions were found")
+
+    result = await insights.review_unapproved(context, since_date="2020-01-01")
+
+    assert ynab.requests[0].url.params["since_date"] == "2020-01-01"
+    assert result["unapproved"] == []
+    assert result["since_date"] == "2020-01-01"
+
+
+@pytest.mark.parametrize(
+    ("first", "anchor", "end", "expected"),
+    [
+        # date_next is the second half of the month: keep the anchor's pattern.
+        ("2026-10-16", "2026-01-01", "2026-11-30", ["2026-10-16", "2026-11-01", "2026-11-16"]),
+        # Anchor day + 15 crosses into the next month.
+        ("2026-10-20", "2026-01-20", "2026-11-30", ["2026-10-20", "2026-11-04", "2026-11-20"]),
+    ],
+)
+def test_occurrences_twice_a_month_uses_anchor(first, anchor, end, expected):
+    dates = occurrences(
+        date.fromisoformat(first),
+        "twiceAMonth",
+        date.fromisoformat(end),
+        date.fromisoformat(anchor),
+    )
+    assert [d.isoformat() for d in dates] == expected
+
+
+async def test_forecast_nets_same_day_events(ynab, context):
+    ynab.add("GET", f"{PLAN}/accounts", {"accounts": [make_account(id="a", balance=100000)]})
+    ynab.add(
+        "GET",
+        f"{PLAN}/scheduled_transactions",
+        {
+            "scheduled_transactions": [
+                {
+                    "id": "bill",
+                    "date_next": "2026-10-10",
+                    "frequency": "never",
+                    "amount": -150000,
+                    "account_id": "a",
+                },
+                {
+                    "id": "pay",
+                    "date_next": "2026-10-10",
+                    "frequency": "never",
+                    "amount": 200000,
+                    "account_id": "a",
+                },
+            ]
+        },
+    )
+
+    result = await insights.forecast_cash_flow(context, days=30)
+
+    account = result["accounts"][0]
+    assert account["lowest_balance"] == 100.0
+    assert account["goes_negative"] is False
+    assert account["ending_balance"] == 150.0

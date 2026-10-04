@@ -264,10 +264,10 @@ These are read-only and use at most two or three YNAB requests each.
 
 | Tool | Answers | Built from |
 |---|---|---|
-| `ReviewUnapproved` | "What needs my attention?" Unapproved transactions, each with a suggested category (with a confidence share) based on how that payee was categorized in the last `history_days` | unapproved transactions + recent transactions |
+| `ReviewUnapproved` | "What needs my attention?" Unapproved transactions, each with a suggested category (with a confidence share) based on how that payee was categorized in the last `history_days`. No suggestion for splits or transfers, and transfers don't count as uncategorized. Looks back to `since_date` (default one year, YNAB's default) and returns that bound | unapproved transactions + recent transactions |
 | `FindOverspending` | Categories with negative available balances, Ready to Assign, and candidate sources: the categories with the most money available, excluding credit card payment categories and categories with an underfunded target | `GetMonth` |
 | `SummarizeSpending` | Spending grouped by category, category group or payee over a date range. Budget accounts only; split lines are counted in their own categories; transfers and income are excluded; refunds reduce spending | transactions for the range + accounts (+ categories when grouping by group) |
-| `ForecastCashFlow` | Each account's ending and lowest balance over the next N days, from scheduled transactions (both sides of transfers). `twiceAMonth` is approximated as the scheduled day and 15 days later | accounts + scheduled transactions |
+| `ForecastCashFlow` | Each account's ending and lowest balance over the next N days, from scheduled transactions (both sides of transfers). Same-day events are netted before checking the low point. `twiceAMonth` is approximated from `date_first`: that day and 15 days later, every month | accounts + scheduled transactions |
 | `ReviewGoals` | Underfunded targets sorted by amount needed, counts of on-track and snoozed targets, and whether Ready to Assign covers the total | `GetMonth` |
 
 ## Testing
