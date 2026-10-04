@@ -26,8 +26,7 @@ from arcade_ynab.tools import (  # noqa: E402
 )
 
 INSTRUCTIONS = """\
-Read-only tools for a user's YNAB (You Need A Budget) data. This server can't create,
-change or delete anything yet; tell the user to make changes in YNAB directly.
+Tools for reading and managing a user's YNAB (You Need A Budget) data.
 
 - YNAB calls a budget a "plan". Every tool defaults to the plan the user opened most
   recently ("last-used"); use ListPlans only when the user has several plans.
@@ -38,6 +37,8 @@ change or delete anything yet; tell the user to make changes in YNAB directly.
 - Tools take IDs. Use the List tools to look up account, category and payee IDs.
 - YNAB allows about 200 API requests per hour per user, so prefer the broadest tool
   that answers the question (for example GetMonth for a monthly overview).
+- Before any write (creating, changing, moving or deleting), confirm the details with
+  the user unless they were explicit.
 """
 
 TOOL_MODULES: tuple[ModuleType, ...] = (
@@ -50,7 +51,7 @@ TOOL_MODULES: tuple[ModuleType, ...] = (
     money_movements,
 )
 
-app = MCPApp(name="ynab", version="0.1.0", instructions=INSTRUCTIONS, log_level="INFO")
+app = MCPApp(name="ynab", version="0.2.0", instructions=INSTRUCTIONS, log_level="INFO")
 
 for module in TOOL_MODULES:
     for obj in vars(module).values():

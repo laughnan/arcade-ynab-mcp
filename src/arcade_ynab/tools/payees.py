@@ -7,9 +7,11 @@ from arcade_mcp_server import Context, tool
 from arcade_ynab import shaping
 from arcade_ynab.client import client_from_context
 from arcade_ynab.tools._common import (
+    CREATES,
     DEFAULT_LIMIT,
     DEFAULT_PLAN,
     READ_ONLY,
+    UPDATES,
     YNAB_AUTH,
     Limit,
     PlanId,
@@ -41,3 +43,30 @@ async def list_payees(
     )
     kept, info = shaping.truncate(payees, clamp_limit(limit))
     return {"payees": kept, **info}
+
+
+@tool(requires_auth=YNAB_AUTH, metadata=CREATES)
+async def create_payee(
+    context: Context,
+    name: Annotated[str, "The payee's name."],
+    plan_id: PlanId = DEFAULT_PLAN,
+) -> Annotated[dict, "The created payee"]:
+    """Create a payee. (CreateTransaction can also create a payee from payee_name.)"""
+    data = await client_from_context(context).post(
+        plan_path(plan_id, "/payees"), {"payee": {"name": name}}
+    )
+    return shaping.payee(data["payee"])
+
+
+@tool(requires_auth=YNAB_AUTH, metadata=UPDATES)
+async def update_payee(
+    context: Context,
+    payee_id: Annotated[str, "The payee to rename."],
+    name: Annotated[str, "The new name."],
+    plan_id: PlanId = DEFAULT_PLAN,
+) -> Annotated[dict, "The renamed payee"]:
+    """Rename a payee. The new name shows on all of its transactions."""
+    data = await client_from_context(context).patch(
+        plan_path(plan_id, f"/payees/{payee_id}"), {"payee": {"name": name}}
+    )
+    return shaping.payee(data["payee"])

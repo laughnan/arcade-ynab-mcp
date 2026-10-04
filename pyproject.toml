@@ -1,6 +1,6 @@
 [project]
 name = "arcade_ynab"
-version = "0.1.0"
+version = "0.2.0"
 description = "YNAB tools for agents, served as an Arcade MCP server"
 requires-python = ">=3.10"
 license = "MIT"
@@ -8,6 +8,7 @@ license-files = ["LICENSE"]
 dependencies = [
     "arcade-mcp-server>=1.17.0,<2.0.0",
     "httpx>=0.28.0,<1.0.0",
+    "typing-extensions>=4.12",
 ]
 
 [project.optional-dependencies]

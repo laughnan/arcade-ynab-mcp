@@ -76,6 +76,25 @@ def account(a: Raw) -> Raw:
     )
 
 
+_CADENCE_UNITS = {1: "month", 2: "week", 13: "year"}
+
+
+def _goal_repeats(c: Raw) -> str | None:
+    """Describe YNAB's goal_cadence/goal_cadence_frequency, e.g. 'every 2 months'."""
+    cadence = c.get("goal_cadence")
+    if not cadence:
+        return None
+    if cadence in _CADENCE_UNITS:
+        unit, every = _CADENCE_UNITS[cadence], c.get("goal_cadence_frequency") or 1
+    elif 3 <= cadence <= 12:
+        unit, every = "month", cadence - 1
+    elif cadence == 14:
+        unit, every = "year", 2
+    else:
+        return None
+    return f"every {unit}" if every == 1 else f"every {every} {unit}s"
+
+
 def _goal(c: Raw) -> Raw | None:
     if not c.get("goal_type"):
         return None
@@ -84,6 +103,8 @@ def _goal(c: Raw) -> Raw | None:
             "type": c.get("goal_type"),
             **_amount(c, "goal_target", "target"),
             "target_date": c.get("goal_target_date"),
+            "repeats": _goal_repeats(c),
+            "needs_whole_amount": c.get("goal_needs_whole_amount"),
             "percentage_complete": c.get("goal_percentage_complete"),
             "months_to_budget": c.get("goal_months_to_budget"),
             **_amount(c, "goal_under_funded", "under_funded"),
@@ -113,18 +134,19 @@ def category(c: Raw) -> Raw:
 
 
 def category_group(g: Raw, include_hidden: bool) -> Raw:
-    categories = [
-        category(c) for c in live(g.get("categories")) if include_hidden or not c.get("hidden")
-    ]
-    return _compact(
+    out = _compact(
         {
             "id": g.get("id"),
             "name": g.get("name"),
             "hidden": g.get("hidden") or None,
             "internal": g.get("internal") or None,
-            "categories": categories,
         }
     )
+    if "categories" in g:
+        out["categories"] = [
+            category(c) for c in live(g["categories"]) if include_hidden or not c.get("hidden")
+        ]
+    return out
 
 
 def month(m: Raw) -> Raw:
