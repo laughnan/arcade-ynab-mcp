@@ -22,9 +22,11 @@ from arcade_ynab.tools._common import (
     PlanId,
     clamp_limit,
     flag_value,
+    is_schedulable,
+    nullable,
     plan_path,
-    require_date,
-    transfer_payee_id,
+    require_schedulable_date,
+    transfer_target,
 )
 
 
@@ -48,12 +50,17 @@ NextDate = Annotated[
     str, "Date of the next occurrence (YYYY-MM-DD), in the future and within 5 years."
 ]
 Amount = Annotated[float, "Amount in currency units. Negative for outflows, positive for inflows."]
-PayeeName = Annotated[str | None, "Payee name (matches or creates a payee)."]
+PayeeName = Annotated[
+    str | None, "Payee name (matches or creates a payee). Ignored if payee_id is given."
+]
 PayeeId = Annotated[str | None, "An existing payee ID."]
 TransferAccountId = Annotated[
     str | None, "For a scheduled transfer, the OTHER account's ID. Don't combine with a payee."
 ]
-CategoryId = Annotated[str | None, "Category ID. Split scheduled transactions aren't supported."]
+CategoryId = Annotated[
+    str | None,
+    "Category ID, or an empty string for none. Split scheduled transactions aren't supported.",
+]
 
 
 @tool(requires_auth=YNAB_AUTH, metadata=READ_ONLY)
@@ -64,7 +71,9 @@ async def list_scheduled_transactions(
 ) -> Annotated[dict, "Scheduled transactions, soonest first"]:
     """List upcoming and recurring scheduled transactions, soonest first, with their
     frequency and next date. Amounts are negative for outflows, positive for inflows."""
-    data = await client_from_context(context).get(plan_path(plan_id, "/scheduled_transactions"))
+    data = await client_from_context(context).get_list(
+        plan_path(plan_id, "/scheduled_transactions")
+    )
     scheduled = sorted(
         (
             shaping.scheduled_transaction(t)
@@ -88,24 +97,39 @@ async def _apply_fields(
     memo: str | None,
     flag_color: FlagColor | None,
 ) -> None:
+    """Apply payee/category/memo/flag changes to a SaveScheduledTransaction body.
+
+    YNAB only uses payee_name when payee_id is null, and PUT replaces the whole object, so
+    clearing a field means sending null rather than leaving it out.
+    """
     if transfer_account_id and (payee_id or payee_name):
         raise RetryableToolError(
             "A transfer can't also have a payee.",
             additional_prompt_content="Use transfer_account_id alone, or a payee without it.",
         )
+    on_budget_transfer = False
     if transfer_account_id:
-        body["payee_id"] = await transfer_payee_id(client, plan_id, transfer_account_id)
+        target = await transfer_target(client, plan_id, transfer_account_id)
+        on_budget_transfer = target.on_budget
+        if on_budget_transfer and category_id:
+            raise RetryableToolError(
+                "A transfer between two budget accounts can't have a category.",
+                additional_prompt_content="Drop category_id for this transfer.",
+            )
+        body["payee_id"] = target.payee_id
         body.pop("payee_name", None)
-    elif payee_id:
-        body["payee_id"] = payee_id
+        if on_budget_transfer:
+            body["category_id"] = None
+    elif payee_id is not None:
+        body["payee_id"] = nullable(payee_id)
         body.pop("payee_name", None)
     elif payee_name:
+        body["payee_id"] = None
         body["payee_name"] = payee_name
-        body.pop("payee_id", None)
-    if category_id:
-        body["category_id"] = category_id
+    if category_id is not None and not on_budget_transfer:
+        body["category_id"] = nullable(category_id)
     if memo is not None:
-        body["memo"] = memo or None
+        body["memo"] = nullable(memo)
     if flag_color:
         body["flag_color"] = flag_value(flag_color)
 
@@ -129,7 +153,7 @@ async def create_scheduled_transaction(
     client = client_from_context(context)
     body: dict[str, Any] = {
         "account_id": account_id,
-        "date": require_date(date, "date"),
+        "date": require_schedulable_date(date, "date"),
         "amount": to_milliunits(amount),
         "frequency": frequency.value,
     }
@@ -141,7 +165,7 @@ async def create_scheduled_transaction(
         payee_id=payee_id,
         transfer_account_id=transfer_account_id,
         category_id=category_id,
-        memo=memo or None,
+        memo=memo,
         flag_color=flag_color,
     )
     data = await client.post(
@@ -167,14 +191,43 @@ async def update_scheduled_transaction(
     plan_id: PlanId = DEFAULT_PLAN,
 ) -> Annotated[dict, "The updated scheduled transaction"]:
     """Change a scheduled transaction. Only the fields you pass change."""
+    changes = (
+        date,
+        amount,
+        frequency,
+        account_id,
+        payee_name,
+        payee_id,
+        transfer_account_id,
+        category_id,
+        memo,
+        flag_color,
+    )
+    if all(value is None for value in changes):
+        raise RetryableToolError(
+            "No changes were given.",
+            additional_prompt_content="Pass at least one field to change.",
+        )
+    next_date = require_schedulable_date(date, "date") if date else None
+
     client = client_from_context(context)
     path = plan_path(plan_id, f"/scheduled_transactions/{scheduled_transaction_id}")
     current = (await client.get(path))["scheduled_transaction"]
+    if next_date is None:
+        if not is_schedulable(current["date_next"]):
+            raise RetryableToolError(
+                f"The next occurrence ({current['date_next']}) isn't in the future, and YNAB "
+                "only accepts future dates when saving a scheduled transaction.",
+                additional_prompt_content=(
+                    "Retry with date set to the next occurrence after today."
+                ),
+            )
+        next_date = current["date_next"]
 
     # YNAB replaces the whole scheduled transaction, so start from its current values.
     body: dict[str, Any] = {
         "account_id": account_id or current["account_id"],
-        "date": require_date(date, "date") if date else current["date_next"],
+        "date": next_date,
         "amount": to_milliunits(amount) if amount is not None else current["amount"],
         "frequency": frequency.value if frequency else current["frequency"],
     }

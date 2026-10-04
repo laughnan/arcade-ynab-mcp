@@ -81,9 +81,17 @@ async def test_get_month_hides_hidden_categories_by_default(ynab, context):
     assert result["ready_to_assign"] == 10.0
     assert result["age_of_money"] == 45
     assert [c["id"] for c in result["categories"]] == ["cat-groceries"]
+    # Month totals include hidden categories, so their amounts are summarized.
+    assert result["omitted_hidden_categories"] == {
+        "count": 1,
+        "assigned": 500.0,
+        "activity": -320.55,
+        "available": 179.45,
+    }
 
     result = await plans.get_month(context, month="2026-03-17", include_hidden=True)
     assert [c["id"] for c in result["categories"]] == ["cat-groceries", "cat-hidden"]
+    assert "omitted_hidden_categories" not in result
 
 
 async def test_get_month_current(ynab, context):
@@ -379,3 +387,52 @@ async def test_list_money_movements_all_months(ynab, context):
 
     assert result["money_movements"] == []
     assert result["total_count"] == 0
+
+
+# --- empty collections ---
+
+
+@pytest.mark.parametrize(
+    ("call", "path", "key"),
+    [
+        (lambda c: plans.list_plans(c), "/plans", "plans"),
+        (lambda c: plans.list_months(c), f"{PLAN}/months", "months"),
+        (lambda c: accounts.list_accounts(c), f"{PLAN}/accounts", "accounts"),
+        (lambda c: payees.list_payees(c), f"{PLAN}/payees", "payees"),
+        (
+            lambda c: transactions.list_transactions(
+                c, transaction_type=TransactionType.UNAPPROVED
+            ),
+            f"{PLAN}/transactions",
+            "transactions",
+        ),
+        (
+            lambda c: scheduled.list_scheduled_transactions(c),
+            f"{PLAN}/scheduled_transactions",
+            "scheduled_transactions",
+        ),
+    ],
+)
+async def test_list_tools_treat_404_as_empty(ynab, context, call, path, key):
+    ynab.error("GET", path, 404, "404.2", "No items were found")
+
+    result = await call(context)
+
+    assert result[key] == []
+
+
+async def test_list_money_movements_empty(ynab, context):
+    ynab.error("GET", f"{PLAN}/money_movements", 404, "404.2", "No money movements were found")
+    ynab.error("GET", f"{PLAN}/money_movement_groups", 404, "404.2", "No groups were found")
+
+    result = await money_movements.list_money_movements(context)
+
+    assert result["money_movements"] == []
+    assert result["total_count"] == 0
+
+
+async def test_get_tools_still_raise_on_404(ynab, context):
+    ynab.error("GET", f"{PLAN}/transactions/nope", 404, "404.2", "not found")
+
+    with pytest.raises(RetryableToolError, match="could not find"):
+        await transactions.get_transaction(context, transaction_id="nope")

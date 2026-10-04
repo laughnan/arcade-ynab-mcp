@@ -464,6 +464,7 @@ async def test_create_scheduled_transaction(ynab, context):
             "date": "2026-11-01",
             "amount": -1500000,
             "frequency": "monthly",
+            "payee_id": None,
             "payee_name": "Landlord",
             "category_id": "cat-rent",
             "memo": "rent",
@@ -505,8 +506,9 @@ async def test_update_scheduled_transaction_switch_to_payee_name(ynab, context):
     )
 
     body = ynab.last_json()["scheduled_transaction"]
+    # YNAB only uses payee_name when payee_id is null, so it must be sent as null.
     assert body["payee_name"] == "New Landlord"
-    assert "payee_id" not in body
+    assert body["payee_id"] is None
 
 
 async def test_delete_scheduled_transaction(ynab, context):
@@ -522,3 +524,161 @@ async def test_delete_scheduled_transaction(ynab, context):
 
     assert result["deleted"] is True
     assert result["scheduled_transaction"]["id"] == "sch-rent"
+
+
+# --- review follow-ups ---
+
+
+async def test_update_transactions_can_clear_category_and_payee(ynab, context):
+    ynab.add("PATCH", f"{PLAN}/transactions", {"transactions": [make_transaction()]})
+
+    await transactions.update_transactions(
+        context, transaction_ids=["t1"], category_id="", payee_id=""
+    )
+
+    assert ynab.last_json() == {
+        "transactions": [{"id": "t1", "category_id": None, "payee_id": None}]
+    }
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"subtransactions": [{"amount": -60}, {"amount": -40}]},
+        {"category_id": "cat-groceries"},
+    ],
+)
+async def test_on_budget_transfer_rejects_split_or_category(ynab, context, extra):
+    ynab.add(
+        "GET",
+        f"{PLAN}/accounts/acct-savings",
+        {"account": make_account(id="acct-savings", on_budget=True)},
+    )
+
+    with pytest.raises(RetryableToolError, match="two budget accounts"):
+        await transactions.create_transaction(
+            context,
+            account_id="acct-checking",
+            date="2026-10-01",
+            amount=-100,
+            transfer_account_id="acct-savings",
+            **extra,
+        )
+    assert bodies(ynab, "POST") == []
+
+
+async def test_transfer_to_tracking_account_can_be_split(ynab, context):
+    ynab.add(
+        "GET",
+        f"{PLAN}/accounts/acct-loan",
+        {"account": make_account(id="acct-loan", on_budget=False, transfer_payee_id="p-loan")},
+    )
+    ynab.add("POST", f"{PLAN}/transactions", {"transaction": make_transaction()})
+
+    await transactions.create_transaction(
+        context,
+        account_id="acct-checking",
+        date="2026-10-01",
+        amount=-100,
+        transfer_account_id="acct-loan",
+        subtransactions=[
+            {"amount": -80, "category_id": "cat-loan"},
+            {"amount": -20, "category_id": "cat-interest"},
+        ],
+    )
+
+    assert ynab.last_json()["transaction"]["payee_id"] == "p-loan"
+
+
+async def test_move_money_checks_source_available(ynab, context):
+    # Assigned only $20 but $100 available (rolled over): moving $100 is allowed.
+    ynab.add(
+        "GET",
+        f"{PLAN}/months/current",
+        _month_with(
+            make_category(id="cat-fun", name="Fun", budgeted=20000, balance=100000),
+            make_category(id="cat-groceries", budgeted=500000),
+        ),
+    )
+    ynab.add(
+        "PATCH",
+        f"{PLAN}/months/current/categories/cat-fun",
+        {"category": make_category(id="cat-fun", budgeted=-80000, balance=0)},
+    )
+    ynab.add(
+        "PATCH",
+        f"{PLAN}/months/current/categories/cat-groceries",
+        {"category": make_category(budgeted=600000)},
+    )
+
+    await move_money(context, 100, "cat-fun", "cat-groceries")
+    assert bodies(ynab, "PATCH")[0] == {"category": {"budgeted": -80000}}
+
+    with pytest.raises(RetryableToolError, match="only has 100.0 available"):
+        await move_money(context, 100.01, "cat-fun", "cat-groceries")
+
+
+async def test_update_scheduled_transaction_requires_changes(ynab, context):
+    with pytest.raises(RetryableToolError, match="No changes"):
+        await scheduled.update_scheduled_transaction(context, scheduled_transaction_id="x")
+    assert ynab.requests == []
+
+
+async def test_update_scheduled_transaction_when_next_date_is_today(ynab, context):
+    path = f"{PLAN}/scheduled_transactions/sch-rent"
+    ynab.add("GET", path, {"scheduled_transaction": {**SCHEDULED, "date_next": "2026-10-04"}})
+
+    with pytest.raises(RetryableToolError, match="isn't in the future"):
+        await scheduled.update_scheduled_transaction(
+            context, scheduled_transaction_id="sch-rent", amount=-1550
+        )
+    assert bodies(ynab, "PUT") == []
+
+    ynab.add("PUT", path, {"scheduled_transaction": SCHEDULED})
+    await scheduled.update_scheduled_transaction(
+        context, scheduled_transaction_id="sch-rent", amount=-1550, date="2026-11-04"
+    )
+    assert ynab.last_json()["scheduled_transaction"]["date"] == "2026-11-04"
+
+
+@pytest.mark.parametrize("bad_date", ["2026-10-04", "2026-09-30", "2031-10-10"])
+async def test_scheduled_dates_must_be_future_within_5_years(ynab, context, bad_date):
+    with pytest.raises(RetryableToolError, match="after today and within 5 years"):
+        await scheduled.create_scheduled_transaction(
+            context,
+            account_id="a",
+            date=bad_date,
+            amount=-1,
+            frequency=Frequency.MONTHLY,
+        )
+
+
+async def test_scheduled_on_budget_transfer_clears_category(ynab, context):
+    path = f"{PLAN}/scheduled_transactions/sch-rent"
+    ynab.add("GET", path, {"scheduled_transaction": SCHEDULED})
+    ynab.add(
+        "GET",
+        f"{PLAN}/accounts/acct-savings",
+        {"account": make_account(id="acct-savings", transfer_payee_id="p-savings")},
+    )
+    ynab.add("PUT", path, {"scheduled_transaction": SCHEDULED})
+
+    await scheduled.update_scheduled_transaction(
+        context, scheduled_transaction_id="sch-rent", transfer_account_id="acct-savings"
+    )
+
+    body = ynab.last_json()["scheduled_transaction"]
+    assert body["payee_id"] == "p-savings"
+    assert body["category_id"] is None
+
+
+async def test_scheduled_clear_category(ynab, context):
+    path = f"{PLAN}/scheduled_transactions/sch-rent"
+    ynab.add("GET", path, {"scheduled_transaction": SCHEDULED})
+    ynab.add("PUT", path, {"scheduled_transaction": SCHEDULED})
+
+    await scheduled.update_scheduled_transaction(
+        context, scheduled_transaction_id="sch-rent", category_id=""
+    )
+
+    assert ynab.last_json()["scheduled_transaction"]["category_id"] is None

@@ -1,3 +1,4 @@
+import pytest
 from conftest import make_account, make_category, make_transaction
 
 from arcade_ynab import shaping
@@ -83,3 +84,41 @@ def test_live_and_truncate():
 
     assert kept == [{"id": 1}]
     assert info == {"total_count": 2, "truncated": True}
+
+
+def test_internal_flag_only_when_true():
+    internal = shaping.category(make_category(name="Inflow: Ready to Assign", internal=True))
+    regular = shaping.category(make_category(internal=False))
+
+    assert internal["internal"] is True
+    assert "internal" not in regular
+    group = shaping.category_group(
+        {"id": "g", "name": "Internal Master Category", "internal": True, "categories": []},
+        include_hidden=False,
+    )
+    assert group["internal"] is True
+
+
+@pytest.mark.parametrize(
+    ("cadence", "frequency", "expected"),
+    [
+        (1, 1, "every month"),
+        (1, 2, "every 2 months"),
+        (2, 1, "every week"),
+        (13, 1, "every year"),
+        (4, None, "every 3 months"),
+        (14, None, "every 2 years"),
+    ],
+)
+def test_goal_repeats_and_needs_whole_amount(cadence, frequency, expected):
+    shaped = shaping.category(
+        make_category(
+            goal_type="NEED",
+            goal_cadence=cadence,
+            goal_cadence_frequency=frequency,
+            goal_needs_whole_amount=True,
+        )
+    )
+
+    assert shaped["goal"]["repeats"] == expected
+    assert shaped["goal"]["needs_whole_amount"] is True

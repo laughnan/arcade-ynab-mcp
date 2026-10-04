@@ -35,7 +35,7 @@ async def list_categories(
     activity and available amounts for the current month and its goal, if any.
 
     Use GetMonth for amounts in a different month."""
-    data = await client_from_context(context).get(plan_path(plan_id, "/categories"))
+    data = await client_from_context(context).get_list(plan_path(plan_id, "/categories"))
     groups = [
         shaping.category_group(g, include_hidden)
         for g in shaping.live(data.get("category_groups"))
@@ -145,9 +145,9 @@ async def move_money(
     """Move money between two categories, or between a category and Ready to Assign, by
     adjusting their assigned amounts for the month. Running it twice moves the money twice.
 
-    YNAB has no single "move" call, so this updates the source first and then the
-    destination. If the second step fails, the money is left in Ready to Assign and the
-    error says so."""
+    The source must have at least the amount available. YNAB has no single "move" call,
+    so this updates the source first and then the destination. If the second step fails,
+    the money is left in Ready to Assign and the error says so."""
     require_positive(amount, "amount")
     if not from_category_id and not to_category_id:
         raise RetryableToolError(
@@ -172,6 +172,16 @@ async def move_money(
             )
 
     milliunits = to_milliunits(amount)
+    if from_category_id:
+        available = by_id[from_category_id].get("balance", 0)
+        if available < milliunits:
+            raise RetryableToolError(
+                f"'{by_id[from_category_id].get('name')}' only has "
+                f"{from_milliunits(available)} available, less than {amount}.",
+                additional_prompt_content=(
+                    "Move at most the available amount, or ask the user how to cover the rest."
+                ),
+            )
     result: dict[str, Any] = {"month": data["month"].get("month"), "amount": amount}
 
     async def set_assigned(category_id: str, budgeted: int) -> dict[str, Any]:

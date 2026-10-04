@@ -37,8 +37,8 @@ async def list_money_movements(
     to_category_id means it went to Ready to Assign. Use ListCategories to resolve IDs."""
     client = client_from_context(context)
     prefix = f"/months/{normalize_month(month)}" if month else ""
-    movements_data = await client.get(plan_path(plan_id, f"{prefix}/money_movements"))
-    groups_data = await client.get(plan_path(plan_id, f"{prefix}/money_movement_groups"))
+    movements_data = await client.get_list(plan_path(plan_id, f"{prefix}/money_movements"))
+    groups_data = await client.get_list(plan_path(plan_id, f"{prefix}/money_movement_groups"))
 
     movements = sorted(
         (shaping.money_movement(m) for m in movements_data.get("money_movements") or []),
