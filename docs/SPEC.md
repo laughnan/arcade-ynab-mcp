@@ -245,17 +245,17 @@ month variants)
 
 | Tool | Endpoint | Behavior |
 |---|---|---|
-| `CreateTransaction` | `POST /transactions` | create. Supports splits (`subtransactions`), transfers (via transfer payee), `payee_name` |
-| `UpdateTransactions` | `PATCH /transactions` | update, idempotent. Bulk: approve, recategorize, set cleared, flag, memo |
+| `CreateTransaction` | `POST /transactions` | create. Supports splits (`subtransactions`, which must add up to the amount), transfers (`transfer_account_id`, which looks up that account's transfer payee) and `payee_name`. Approved by default |
+| `UpdateTransactions` | `PATCH /transactions` | update, idempotent. Applies the same changes to up to 100 transactions: approve, recategorize, payee, cleared, flag, memo, date. `amount` only when updating a single transaction |
 | `DeleteTransaction` | `DELETE /transactions/{id}` | delete, destructive |
 | `ImportTransactions` | `POST /transactions/import` | create. Pulls new transactions from linked accounts |
 | `AssignToCategory` | `PATCH /months/{month}/categories/{id}` | update, idempotent. Sets the assigned amount for a month |
-| `MoveMoney` | two category PATCHes | update. Moves an amount between categories, or to and from Ready to Assign. Not atomic: if the second write fails, the tool reports the state left after the first |
-| `CreateCategory` / `UpdateCategory` | `POST` / `PATCH /categories` | create / update. Name, note, group, hidden, goal target |
+| `MoveMoney` | one month GET + up to two category PATCHes | update, not idempotent. Moves an amount between categories, or to and from Ready to Assign. Not atomic: it takes money out of the source first, so if the second write fails, the money is left in Ready to Assign and the error says so |
+| `CreateCategory` / `UpdateCategory` | `POST` / `PATCH /categories` | create / update. Name, note, group, target (amount, date, repeat frequency, set-aside vs refill). YNAB's API can't hide or unhide categories |
 | `CreateCategoryGroup` / `UpdateCategoryGroup` | `POST` / `PATCH /category_groups` | create / update |
 | `CreatePayee` / `UpdatePayee` | `POST` / `PATCH /payees` | create / update (rename) |
 | `CreateAccount` | `POST /accounts` | create. Name, type, starting balance |
-| `CreateScheduledTransaction` / `UpdateScheduledTransaction` | `POST` / `PUT /scheduled_transactions` | create / update |
+| `CreateScheduledTransaction` / `UpdateScheduledTransaction` | `POST` / `PUT /scheduled_transactions` | create / update. YNAB replaces the whole object on `PUT`, so the update reads the current values first and changes only the fields passed |
 | `DeleteScheduledTransaction` | `DELETE /scheduled_transactions/{id}` | delete, destructive |
 
 ### Phase 3: Composite and analysis tools

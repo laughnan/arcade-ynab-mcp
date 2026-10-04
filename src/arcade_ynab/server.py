@@ -49,7 +49,7 @@ TOOL_MODULES: tuple[ModuleType, ...] = (
     money_movements,
 )
 
-app = MCPApp(name="ynab", version="0.1.0", instructions=INSTRUCTIONS, log_level="INFO")
+app = MCPApp(name="ynab", version="0.2.0", instructions=INSTRUCTIONS, log_level="INFO")
 
 for module in TOOL_MODULES:
     for obj in vars(module).values():

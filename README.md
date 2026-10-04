@@ -25,6 +25,25 @@ Phase 1 (read-only):
 | `Ynab.ListScheduledTransactions` | Upcoming and recurring transactions |
 | `Ynab.ListMoneyMovements` | Money moved between categories |
 
+Phase 2 (writes):
+
+| Tool | What it does |
+|---|---|
+| `Ynab.CreateTransaction` | Add a purchase, income, transfer or split |
+| `Ynab.UpdateTransactions` | Approve, recategorize, flag or edit up to 100 transactions at once |
+| `Ynab.DeleteTransaction` | Delete one transaction (destructive) |
+| `Ynab.ImportTransactions` | Import new transactions from linked accounts |
+| `Ynab.AssignToCategory` | Set a category's assigned amount for a month |
+| `Ynab.MoveMoney` | Move money between categories or Ready to Assign |
+| `Ynab.CreateCategory` / `Ynab.UpdateCategory` | Create or edit categories and their targets |
+| `Ynab.CreateCategoryGroup` / `Ynab.UpdateCategoryGroup` | Create or rename category groups |
+| `Ynab.CreatePayee` / `Ynab.UpdatePayee` | Create or rename payees |
+| `Ynab.CreateAccount` | Create an unlinked account |
+| `Ynab.CreateScheduledTransaction` / `Ynab.UpdateScheduledTransaction` / `Ynab.DeleteScheduledTransaction` | Manage scheduled transactions |
+
+Every tool is tagged read-only or write (and delete tools as destructive), so a gateway can
+expose only the read tools.
+
 Amounts are in currency units (not YNAB milliunits). Every tool defaults to the user's
 most recently used plan.
 

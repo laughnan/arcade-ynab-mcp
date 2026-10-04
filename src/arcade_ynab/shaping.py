@@ -110,17 +110,12 @@ def category(c: Raw) -> Raw:
 
 
 def category_group(g: Raw, include_hidden: bool) -> Raw:
-    categories = [
-        category(c) for c in live(g.get("categories")) if include_hidden or not c.get("hidden")
-    ]
-    return _compact(
-        {
-            "id": g.get("id"),
-            "name": g.get("name"),
-            "hidden": g.get("hidden") or None,
-            "categories": categories,
-        }
-    )
+    out = _compact({"id": g.get("id"), "name": g.get("name"), "hidden": g.get("hidden") or None})
+    if "categories" in g:
+        out["categories"] = [
+            category(c) for c in live(g["categories"]) if include_hidden or not c.get("hidden")
+        ]
+    return out
 
 
 def month(m: Raw) -> Raw:
