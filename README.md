@@ -28,3 +28,7 @@ Then add the server's tools to an MCP Gateway in the Arcade dashboard.
 
 Never commit tokens or personal budget data. Secrets are provided at runtime via
 `.env` (local) or Arcade secrets (deployed) and are never exposed to the model.
+
+## License
+
+[MIT](LICENSE)
