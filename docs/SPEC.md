@@ -136,9 +136,13 @@ docs/
 └── SPEC.md
 ```
 
-- `server.py` stays thin. It registers tool modules with `app.add_tools_from_module(...)`
-  and keeps `app.run()` inside `if __name__ == "__main__":`, which `arcade deploy`
-  requires.
+- `server.py` stays thin. Tools are defined with the `@tool` decorator in `tools/`
+  modules, and `server.py` registers each one with `app.add_tool(...)`. It doesn't use
+  `app.add_tools_from_module(...)`, because that looks up installed package metadata by
+  module name and so only works for top-level packages, not submodules like
+  `arcade_ynab.tools.plans`.
+- `server.py` keeps `app.run()` inside `if __name__ == "__main__":`, which
+  `arcade deploy` requires.
 - The toolkit is named `ynab`, so tools are exposed as `Ynab.ListPlans`, and so on.
 
 ## Design rules
