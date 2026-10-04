@@ -18,6 +18,7 @@ from arcade_mcp_server.mcp_app import TransportType  # noqa: E402
 from arcade_ynab.tools import (  # noqa: E402
     accounts,
     categories,
+    insights,
     money_movements,
     payees,
     plans,
@@ -37,6 +38,8 @@ Tools for reading and managing a user's YNAB (You Need A Budget) data.
 - Tools take IDs. Use the List tools to look up account, category and payee IDs.
 - YNAB allows about 200 API requests per hour per user, so prefer the broadest tool
   that answers the question (for example GetMonth for a monthly overview).
+- For common questions, start with the summary tools: ReviewUnapproved ("what needs my
+  attention?"), FindOverspending, SummarizeSpending, ForecastCashFlow and ReviewGoals.
 - Before any write (creating, changing, moving or deleting), confirm the details with
   the user unless they were explicit.
 """
@@ -49,9 +52,10 @@ TOOL_MODULES: tuple[ModuleType, ...] = (
     transactions,
     scheduled,
     money_movements,
+    insights,
 )
 
-app = MCPApp(name="ynab", version="0.2.0", instructions=INSTRUCTIONS, log_level="INFO")
+app = MCPApp(name="ynab", version="0.3.0", instructions=INSTRUCTIONS, log_level="INFO")
 
 for module in TOOL_MODULES:
     for obj in vars(module).values():

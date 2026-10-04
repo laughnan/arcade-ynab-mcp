@@ -19,7 +19,7 @@ from arcade_ynab.money import from_milliunits
 Raw = dict[str, Any]
 
 
-def _compact(d: Raw) -> Raw:
+def compact(d: Raw) -> Raw:
     return {k: v for k, v in d.items() if v is not None}
 
 
@@ -41,7 +41,7 @@ def live(items: list[Raw] | None) -> list[Raw]:
 
 
 def plan(p: Raw) -> Raw:
-    out = _compact(
+    out = compact(
         {
             "id": p.get("id"),
             "name": p.get("name"),
@@ -57,7 +57,7 @@ def plan(p: Raw) -> Raw:
 
 
 def account(a: Raw) -> Raw:
-    return _compact(
+    return compact(
         {
             "id": a.get("id"),
             "name": a.get("name"),
@@ -98,7 +98,7 @@ def _goal_repeats(c: Raw) -> str | None:
 def _goal(c: Raw) -> Raw | None:
     if not c.get("goal_type"):
         return None
-    return _compact(
+    return compact(
         {
             "type": c.get("goal_type"),
             **_amount(c, "goal_target", "target"),
@@ -116,7 +116,7 @@ def _goal(c: Raw) -> Raw | None:
 
 
 def category(c: Raw) -> Raw:
-    return _compact(
+    return compact(
         {
             "id": c.get("id"),
             "name": c.get("name"),
@@ -134,7 +134,7 @@ def category(c: Raw) -> Raw:
 
 
 def category_group(g: Raw, include_hidden: bool) -> Raw:
-    out = _compact(
+    out = compact(
         {
             "id": g.get("id"),
             "name": g.get("name"),
@@ -150,7 +150,7 @@ def category_group(g: Raw, include_hidden: bool) -> Raw:
 
 
 def month(m: Raw) -> Raw:
-    return _compact(
+    return compact(
         {
             "month": m.get("month"),
             "note": m.get("note"),
@@ -164,7 +164,7 @@ def month(m: Raw) -> Raw:
 
 
 def payee(p: Raw) -> Raw:
-    return _compact(
+    return compact(
         {
             "id": p.get("id"),
             "name": p.get("name"),
@@ -174,7 +174,7 @@ def payee(p: Raw) -> Raw:
 
 
 def subtransaction(s: Raw) -> Raw:
-    return _compact(
+    return compact(
         {
             "id": s.get("id"),
             **_amount(s, "amount"),
@@ -190,7 +190,7 @@ def subtransaction(s: Raw) -> Raw:
 
 def transaction(t: Raw) -> Raw:
     """Shape a transaction, including the "hybrid" rows returned by category/payee endpoints."""
-    out = _compact(
+    out = compact(
         {
             "id": t.get("id"),
             "date": t.get("date"),
@@ -219,7 +219,7 @@ def transaction(t: Raw) -> Raw:
 
 
 def scheduled_transaction(t: Raw) -> Raw:
-    out = _compact(
+    out = compact(
         {
             "id": t.get("id"),
             "date_first": t.get("date_first"),
@@ -244,7 +244,7 @@ def scheduled_transaction(t: Raw) -> Raw:
 
 
 def money_movement(m: Raw) -> Raw:
-    return _compact(
+    return compact(
         {
             "id": m.get("id"),
             "month": m.get("month"),
@@ -259,7 +259,7 @@ def money_movement(m: Raw) -> Raw:
 
 
 def money_movement_group(g: Raw) -> Raw:
-    return _compact(
+    return compact(
         {
             "id": g.get("id"),
             "month": g.get("month"),
