@@ -29,7 +29,7 @@ async def list_payees(
 ) -> Annotated[dict, "Payees sorted by name"]:
     """List a plan's payees, sorted by name. Transfer payees (which represent transfers to
     another account) include the transfer_account_id."""
-    data = await client_from_context(context).get(plan_path(plan_id, "/payees"))
+    data = await client_from_context(context).get_list(plan_path(plan_id, "/payees"))
     needle = (name_contains or "").strip().lower()
     payees = sorted(
         (

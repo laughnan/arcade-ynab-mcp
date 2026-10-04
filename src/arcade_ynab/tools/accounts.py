@@ -17,7 +17,7 @@ async def list_accounts(
 ) -> Annotated[dict, "Accounts with type, budget status and balances"]:
     """List a plan's accounts with their type, whether they're on budget (or tracking only),
     and their working, cleared and uncleared balances."""
-    data = await client_from_context(context).get(plan_path(plan_id, "/accounts"))
+    data = await client_from_context(context).get_list(plan_path(plan_id, "/accounts"))
     accounts = [
         shaping.account(a)
         for a in shaping.live(data.get("accounts"))

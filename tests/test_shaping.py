@@ -83,3 +83,16 @@ def test_live_and_truncate():
 
     assert kept == [{"id": 1}]
     assert info == {"total_count": 2, "truncated": True}
+
+
+def test_internal_flag_only_when_true():
+    internal = shaping.category(make_category(name="Inflow: Ready to Assign", internal=True))
+    regular = shaping.category(make_category(internal=False))
+
+    assert internal["internal"] is True
+    assert "internal" not in regular
+    group = shaping.category_group(
+        {"id": "g", "name": "Internal Master Category", "internal": True, "categories": []},
+        include_hidden=False,
+    )
+    assert group["internal"] is True

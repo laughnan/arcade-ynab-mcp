@@ -67,7 +67,7 @@ async def list_transactions(
         resource, resource_id = next(iter(chosen.items()))
         suffix = f"/{resource}/{resource_id}/transactions"
 
-    data = await client_from_context(context).get(
+    data = await client_from_context(context).get_list(
         plan_path(plan_id, suffix),
         since_date=validate_date(since_date, "since_date"),
         until_date=validate_date(until_date, "until_date"),

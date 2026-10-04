@@ -37,8 +37,13 @@ class YnabClient:
         *,
         params: dict[str, Any] | None = None,
         json: dict[str, Any] | None = None,
+        empty_on_404: bool = False,
     ) -> dict[str, Any]:
-        """Send a request and return the response's ``data`` object."""
+        """Send a request and return the response's ``data`` object.
+
+        With ``empty_on_404``, a 404 returns ``{}``. YNAB's list endpoints answer 404
+        ("No transactions were found") when a collection is empty.
+        """
         clean_params = {k: v for k, v in (params or {}).items() if v is not None}
         async with httpx.AsyncClient(
             base_url=BASE_URL,
@@ -47,12 +52,18 @@ class YnabClient:
             transport=TRANSPORT,
         ) as client:
             response = await client.request(method, path, params=clean_params, json=json)
+        if response.status_code == 404 and empty_on_404:
+            return {}
         if response.is_error:
             _raise_for_error(response)
         return response.json().get("data", {})
 
     async def get(self, path: str, **params: Any) -> dict[str, Any]:
         return await self.request("GET", path, params=params)
+
+    async def get_list(self, path: str, **params: Any) -> dict[str, Any]:
+        """GET a collection; an empty collection (404) returns ``{}``."""
+        return await self.request("GET", path, params=params, empty_on_404=True)
 
     async def post(self, path: str, json: dict[str, Any]) -> dict[str, Any]:
         return await self.request("POST", path, json=json)
