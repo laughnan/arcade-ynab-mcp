@@ -1,0 +1,31 @@
+# Secrets: never commit real tokens. Use .env locally, `arcade secret set` for deploys.
+.env
+.env.*
+!.env.example
+
+# Personal/local data stays out of this public repo
+local/
+*.local.*
+exports/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Arcade
+.arcade/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
