@@ -682,3 +682,13 @@ async def test_scheduled_clear_category(ynab, context):
     )
 
     assert ynab.last_json()["scheduled_transaction"]["category_id"] is None
+
+
+async def test_update_transactions_payee_name_sends_null_payee_id(ynab, context):
+    ynab.add("PATCH", f"{PLAN}/transactions", {"transactions": [make_transaction()]})
+
+    await transactions.update_transactions(context, transaction_ids=["t1"], payee_name="Bakery")
+
+    assert ynab.last_json() == {
+        "transactions": [{"id": "t1", "payee_id": None, "payee_name": "Bakery"}]
+    }

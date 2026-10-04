@@ -277,6 +277,8 @@ async def update_transactions(
     if payee_id is not None:
         changes["payee_id"] = nullable(payee_id)
     elif payee_name:
+        # YNAB only uses payee_name when payee_id is null.
+        changes["payee_id"] = None
         changes["payee_name"] = payee_name
     if memo is not None:
         changes["memo"] = nullable(memo)
