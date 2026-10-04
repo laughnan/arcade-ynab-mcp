@@ -1,3 +1,4 @@
+import pytest
 from conftest import make_account, make_category, make_transaction
 
 from arcade_ynab import shaping
@@ -96,3 +97,28 @@ def test_internal_flag_only_when_true():
         include_hidden=False,
     )
     assert group["internal"] is True
+
+
+@pytest.mark.parametrize(
+    ("cadence", "frequency", "expected"),
+    [
+        (1, 1, "every month"),
+        (1, 2, "every 2 months"),
+        (2, 1, "every week"),
+        (13, 1, "every year"),
+        (4, None, "every 3 months"),
+        (14, None, "every 2 years"),
+    ],
+)
+def test_goal_repeats_and_needs_whole_amount(cadence, frequency, expected):
+    shaped = shaping.category(
+        make_category(
+            goal_type="NEED",
+            goal_cadence=cadence,
+            goal_cadence_frequency=frequency,
+            goal_needs_whole_amount=True,
+        )
+    )
+
+    assert shaped["goal"]["repeats"] == expected
+    assert shaped["goal"]["needs_whole_amount"] is True

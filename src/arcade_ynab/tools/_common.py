@@ -1,7 +1,8 @@
 """Shared auth, metadata and parameter helpers for YNAB tools."""
 
 import re
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, timedelta
 from enum import Enum
 from typing import Annotated
 
@@ -145,13 +146,44 @@ def require_positive(amount: float, name: str) -> None:
         )
 
 
-async def transfer_payee_id(client: YnabClient, plan_id: str, account_id: str) -> str:
-    """Return the payee that represents a transfer into ``account_id``."""
+@dataclass(frozen=True)
+class TransferTarget:
+    payee_id: str
+    on_budget: bool
+
+
+async def transfer_target(client: YnabClient, plan_id: str, account_id: str) -> TransferTarget:
+    """Look up the payee that represents a transfer into ``account_id``."""
     data = await client.get(plan_path(plan_id, f"/accounts/{account_id}"))
-    payee_id = data["account"].get("transfer_payee_id")
+    account = data["account"]
+    payee_id = account.get("transfer_payee_id")
     if not payee_id:
         raise RetryableToolError(
             f"Account {account_id} cannot receive transfers.",
             additional_prompt_content="Use ListAccounts to pick a different transfer account.",
         )
-    return str(payee_id)
+    return TransferTarget(payee_id=str(payee_id), on_budget=bool(account.get("on_budget")))
+
+
+# YNAB requires scheduled transaction dates to be in the future, at most 5 years out.
+MAX_SCHEDULE_DAYS = 5 * 365
+
+
+def is_schedulable(value: str) -> bool:
+    today = date.today()
+    return today < date.fromisoformat(value) <= today + timedelta(days=MAX_SCHEDULE_DAYS)
+
+
+def require_schedulable_date(value: str, name: str) -> str:
+    validated = require_date(value, name)
+    if not is_schedulable(validated):
+        raise RetryableToolError(
+            f"{name} must be after today and within 5 years.",
+            additional_prompt_content=f"Pass a future {name} (YYYY-MM-DD).",
+        )
+    return validated
+
+
+def nullable(value: str | None) -> str | None:
+    """Map an explicit empty string to None, which YNAB uses to clear a field."""
+    return value or None

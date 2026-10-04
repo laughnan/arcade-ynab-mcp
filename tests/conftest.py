@@ -5,6 +5,7 @@ All data here is invented. Tests never call the real API.
 
 import json
 from dataclasses import dataclass, field
+from datetime import date
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,6 +13,18 @@ import httpx
 import pytest
 
 from arcade_ynab import client as client_module
+from arcade_ynab.tools import _common
+
+TODAY = date(2026, 10, 4)
+
+
+class FixedDate(date):
+    """A ``date`` whose ``today()`` is pinned to TODAY, so tests don't depend on the clock."""
+
+    @classmethod
+    def today(cls):
+        return cls(TODAY.year, TODAY.month, TODAY.day)
+
 
 API_PREFIX = "/v1"
 
@@ -67,6 +80,12 @@ def ynab(monkeypatch: pytest.MonkeyPatch) -> FakeYnab:
     fake = FakeYnab()
     monkeypatch.setattr(client_module, "TRANSPORT", httpx.MockTransport(fake.handler))
     return fake
+
+
+@pytest.fixture(autouse=True)
+def fixed_today(monkeypatch: pytest.MonkeyPatch) -> date:
+    monkeypatch.setattr(_common, "date", FixedDate)
+    return TODAY
 
 
 @pytest.fixture

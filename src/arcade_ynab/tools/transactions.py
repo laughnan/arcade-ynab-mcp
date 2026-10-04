@@ -24,9 +24,10 @@ from arcade_ynab.tools._common import (
     PlanId,
     clamp_limit,
     flag_value,
+    nullable,
     plan_path,
     require_date,
-    transfer_payee_id,
+    transfer_target,
     validate_date,
 )
 
@@ -197,7 +198,16 @@ async def create_transaction(
         "approved": approved,
     }
     if transfer_account_id:
-        body["payee_id"] = await transfer_payee_id(client, plan_id, transfer_account_id)
+        target = await transfer_target(client, plan_id, transfer_account_id)
+        if target.on_budget and (subtransactions or category_id):
+            raise RetryableToolError(
+                "A transfer between two budget accounts can't have a category or be split.",
+                additional_prompt_content=(
+                    "Drop category_id and subtransactions. Only transfers to tracking accounts "
+                    "can be categorized or split."
+                ),
+            )
+        body["payee_id"] = target.payee_id
     elif payee_id:
         body["payee_id"] = payee_id
     elif payee_name:
@@ -222,8 +232,15 @@ async def update_transactions(
         list[str], f"IDs of the transactions to change (1-{MAX_BULK_UPDATE})."
     ],
     approved: Annotated[bool | None, "Set approved (true) or unapproved (false)."] = None,
-    category_id: Annotated[str | None, "Recategorize. Not allowed on split transactions."] = None,
-    payee_id: Annotated[str | None, "Change the payee to this existing payee."] = None,
+    category_id: Annotated[
+        str | None,
+        "Recategorize, or pass an empty string to make it uncategorized. Not allowed on "
+        "split transactions.",
+    ] = None,
+    payee_id: Annotated[
+        str | None,
+        "Change the payee to this existing payee, or pass an empty string to remove the payee.",
+    ] = None,
     payee_name: Annotated[
         str | None, "Change the payee by name (matches or creates a payee)."
     ] = None,
@@ -255,14 +272,14 @@ async def update_transactions(
     changes: dict[str, Any] = {}
     if approved is not None:
         changes["approved"] = approved
-    if category_id:
-        changes["category_id"] = category_id
-    if payee_id:
-        changes["payee_id"] = payee_id
+    if category_id is not None:
+        changes["category_id"] = nullable(category_id)
+    if payee_id is not None:
+        changes["payee_id"] = nullable(payee_id)
     elif payee_name:
         changes["payee_name"] = payee_name
     if memo is not None:
-        changes["memo"] = memo or None
+        changes["memo"] = nullable(memo)
     if cleared:
         changes["cleared"] = cleared.value
     if flag_color:
