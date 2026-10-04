@@ -7,7 +7,9 @@ Rules applied everywhere:
 - YNAB's API names are mapped to the names used in the YNAB app
   (``budgeted`` -> ``assigned``, ``balance`` -> ``available`` on categories,
   ``to_be_budgeted`` -> ``ready_to_assign``).
-- Keys with ``None`` values are omitted.
+- Keys with ``None`` values are omitted, and flags like ``hidden`` and ``internal`` only
+  appear when true. ``internal`` marks YNAB's system categories (Inflow: Ready to Assign,
+  Uncategorized), which aren't budget lines.
 """
 
 from typing import Any
@@ -100,6 +102,7 @@ def category(c: Raw) -> Raw:
             "category_group_id": c.get("category_group_id"),
             "category_group_name": c.get("category_group_name"),
             "hidden": c.get("hidden") or None,
+            "internal": c.get("internal") or None,
             "note": c.get("note"),
             **_amount(c, "budgeted", "assigned"),
             **_amount(c, "activity"),
@@ -110,7 +113,14 @@ def category(c: Raw) -> Raw:
 
 
 def category_group(g: Raw, include_hidden: bool) -> Raw:
-    out = _compact({"id": g.get("id"), "name": g.get("name"), "hidden": g.get("hidden") or None})
+    out = _compact(
+        {
+            "id": g.get("id"),
+            "name": g.get("name"),
+            "hidden": g.get("hidden") or None,
+            "internal": g.get("internal") or None,
+        }
+    )
     if "categories" in g:
         out["categories"] = [
             category(c) for c in live(g["categories"]) if include_hidden or not c.get("hidden")

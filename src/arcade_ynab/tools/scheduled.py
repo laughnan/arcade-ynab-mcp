@@ -64,7 +64,9 @@ async def list_scheduled_transactions(
 ) -> Annotated[dict, "Scheduled transactions, soonest first"]:
     """List upcoming and recurring scheduled transactions, soonest first, with their
     frequency and next date. Amounts are negative for outflows, positive for inflows."""
-    data = await client_from_context(context).get(plan_path(plan_id, "/scheduled_transactions"))
+    data = await client_from_context(context).get_list(
+        plan_path(plan_id, "/scheduled_transactions")
+    )
     scheduled = sorted(
         (
             shaping.scheduled_transaction(t)

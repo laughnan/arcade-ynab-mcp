@@ -35,7 +35,7 @@ async def list_categories(
     activity and available amounts for the current month and its goal, if any.
 
     Use GetMonth for amounts in a different month."""
-    data = await client_from_context(context).get(plan_path(plan_id, "/categories"))
+    data = await client_from_context(context).get_list(plan_path(plan_id, "/categories"))
     groups = [
         shaping.category_group(g, include_hidden)
         for g in shaping.live(data.get("category_groups"))

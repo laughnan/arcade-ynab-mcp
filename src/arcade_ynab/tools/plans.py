@@ -6,6 +6,7 @@ from arcade_mcp_server import Context, tool
 
 from arcade_ynab import shaping
 from arcade_ynab.client import client_from_context
+from arcade_ynab.money import from_milliunits
 from arcade_ynab.tools._common import (
     DEFAULT_PLAN,
     READ_ONLY,
@@ -31,7 +32,7 @@ async def list_plans(
     include_accounts: Annotated[bool, "Also return each plan's open and closed accounts."] = False,
 ) -> Annotated[dict, "The user's plans (budgets) and the default plan, if one is set"]:
     """List the user's YNAB plans (budgets), most recently modified first."""
-    data = await client_from_context(context).get(
+    data = await client_from_context(context).get_list(
         "/plans", include_accounts=str(include_accounts).lower()
     )
     plans = sorted(
@@ -63,6 +64,10 @@ async def get_month(
     """Get one plan month: Ready to Assign, age of money, income, total assigned and activity,
     plus every category's assigned, activity and available amounts and goal progress.
 
+    Month totals cover all categories. When hidden categories are left out of the list,
+    their combined amounts are in omitted_hidden_categories. Categories marked internal
+    are YNAB system categories (e.g. Inflow: Ready to Assign), not budget lines.
+
     This is the best single call for "how is my budget doing this month?".
     """
     data = await client_from_context(context).get(
@@ -70,11 +75,19 @@ async def get_month(
     )
     raw = data["month"]
     result = shaping.month(raw)
+    categories = shaping.live(raw.get("categories"))
     result["categories"] = [
-        shaping.category(c)
-        for c in shaping.live(raw.get("categories"))
-        if include_hidden or not c.get("hidden")
+        shaping.category(c) for c in categories if include_hidden or not c.get("hidden")
     ]
+    hidden = [c for c in categories if c.get("hidden")]
+    if hidden and not include_hidden:
+        # Month totals include hidden categories; summarize them so the list reconciles.
+        result["omitted_hidden_categories"] = {
+            "count": len(hidden),
+            "assigned": from_milliunits(sum(c.get("budgeted", 0) for c in hidden)),
+            "activity": from_milliunits(sum(c.get("activity", 0) for c in hidden)),
+            "available": from_milliunits(sum(c.get("balance", 0) for c in hidden)),
+        }
     return result
 
 
@@ -86,7 +99,7 @@ async def list_months(
 ) -> Annotated[dict, "Monthly summaries, newest first"]:
     """List monthly summaries for a plan (Ready to Assign, income, assigned, activity,
     age of money), newest first. Use GetMonth for category detail in a single month."""
-    data = await client_from_context(context).get(plan_path(plan_id, "/months"))
+    data = await client_from_context(context).get_list(plan_path(plan_id, "/months"))
     months = sorted(
         (shaping.month(m) for m in shaping.live(data.get("months"))),
         key=lambda m: m.get("month") or "",

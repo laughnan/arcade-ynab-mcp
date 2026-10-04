@@ -26,7 +26,8 @@ from arcade_ynab.tools import (  # noqa: E402
 )
 
 INSTRUCTIONS = """\
-Tools for reading and managing a user's YNAB (You Need A Budget) data.
+Read-only tools for a user's YNAB (You Need A Budget) data. This server can't create,
+change or delete anything yet; tell the user to make changes in YNAB directly.
 
 - YNAB calls a budget a "plan". Every tool defaults to the plan the user opened most
   recently ("last-used"); use ListPlans only when the user has several plans.
