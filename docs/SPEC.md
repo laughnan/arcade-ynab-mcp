@@ -58,7 +58,10 @@ MCP client ──► Arcade MCP Gateway ──► arcade_ynab (Arcade Cloud) ─
   complicate token handling, so every tool requests full access.
 - **Access control happens at the gateway.** Every tool carries `ToolMetadata` behavior
   flags (`read_only`, `destructive` and so on). A read-only gateway is built by
-  selecting only the read tools.
+  selecting only the read tools. The flags and the server's instructions are advisory:
+  they don't stop a client from calling an exposed write tool. The recommended setup is
+  a read gateway plus a separate write gateway, with approval required in the client
+  (see [GATEWAYS.md](GATEWAYS.md)).
 - **Rate limits are per user.** YNAB allows 200 requests per hour per access token on a
   rolling window. Each user has their own token, so users don't share a budget. Tools
   must still keep API calls to a minimum (see [Design rules](#design-rules)).
@@ -93,8 +96,9 @@ The order matters, because each side needs a value from the other.
    to HTTP Basic, and Arcade's docs warn that sending credentials in both places makes
    token exchanges fail.
 5. Deploy with `arcade deploy -e src/arcade_ynab/server.py`.
-6. Create an MCP Gateway, select the tools, and choose **Arcade Auth** mode. Users who are
-   members of the Arcade project connect to `https://api.arcade.dev/mcp/<gateway-slug>`.
+6. Create the MCP Gateways described in [GATEWAYS.md](GATEWAYS.md) (a read gateway, and
+   a write gateway only if needed), each in **Arcade Auth** mode. Users who are members
+   of the Arcade project connect to `https://api.arcade.dev/mcp/<gateway-slug>`.
 
 ### YNAB OAuth application
 
@@ -309,8 +313,9 @@ Each step below is a separate pull request.
    tokens.
 2. **Default plan selection.** Should the YNAB app enable it, so `plan_id="default"`
    works? Or is `last-used` enough?
-3. **Separate read and write gateways.** Should the recommended setup be one read-only
-   gateway plus a separate gateway that includes write tools?
+3. **Separate read and write gateways.** Resolved: yes. Use a read-only gateway by
+   default and a separate write gateway with client-side approval (see
+   [GATEWAYS.md](GATEWAYS.md)).
 4. **Python version on Arcade Cloud.** `requires-python` is `>=3.10`. Confirm which
    version Arcade Cloud runs, and set ruff and mypy targets to match.
 

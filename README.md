@@ -52,7 +52,8 @@ Phase 3 (summaries, read-only):
 | `Ynab.ReviewGoals` | Underfunded targets and what it takes to fund them |
 
 Every tool is tagged read-only or write (and delete tools as destructive), so a gateway can
-expose only the read tools.
+expose only the read tools. The tags are descriptive, not an approval mechanism; see
+[docs/GATEWAYS.md](docs/GATEWAYS.md).
 
 Amounts are in currency units (not YNAB milliunits). Every tool defaults to the user's
 most recently used plan.
@@ -92,7 +93,9 @@ arcade login
 arcade deploy -e src/arcade_ynab/server.py
 ```
 
-Then add the server's tools to an MCP Gateway in the Arcade dashboard.
+Then create gateways in the Arcade dashboard: a read gateway for everyday use and, only if
+you need writes, a separate write gateway with approval required in the client. The tool
+lists and verification steps are in [docs/GATEWAYS.md](docs/GATEWAYS.md).
 
 ## Security
 
