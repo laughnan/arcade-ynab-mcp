@@ -112,4 +112,5 @@ def test_gateway_docs_match_tool_metadata():
     write = {str(d.fully_qualified_name) for d in _definitions()} - read
 
     assert _documented_tools("### Read gateway") == read
-    assert _documented_tools("### Write gateway") == write
+    assert _documented_tools("### All write tools") == write
+    assert _documented_tools("### Write gateway") <= write

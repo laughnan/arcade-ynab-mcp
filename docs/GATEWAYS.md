@@ -20,6 +20,18 @@ client. This page describes the recommended setup.
 So the boundary that matters is: keep write tools out of the gateway you use every day,
 and require approval wherever write tools are exposed.
 
+Two limits remain even with that setup:
+
+- **The token behind read tools can write.** Every tool uses the same full-access YNAB
+  token (the server requests no `read-only` scope, so users authorize once; see the
+  SPEC's authorization model). A read gateway hides the write *tools*; it doesn't make
+  the credential read-only. The read tools don't write today, and tests check their
+  metadata, but a bug in one could still change the plan.
+- **Running the server locally skips the gateways.** `uv run src/arcade_ynab/server.py`
+  (stdio or HTTP) registers every tool, reads and writes, with no gateway in front. In
+  that mode the client's approval setting is the only control, so set it up as described
+  below for every write tool.
+
 ## Recommended setup
 
 Create two gateways in the Arcade dashboard, both in **Arcade Auth** mode so only
@@ -27,8 +39,8 @@ members of the Arcade project can use them.
 
 ### Read gateway (everyday use)
 
-Select only these tools. They are all tagged `read_only=True`, and none of them change
-anything in YNAB.
+Select only these tools. They are all tagged `read_only=True`, and none of them call a
+YNAB endpoint that changes data.
 
 ```text
 Ynab.GetUser
@@ -56,9 +68,23 @@ Connect this gateway in every client by default.
 
 ### Write gateway (only when you mean to change something)
 
-Select the smallest set of write tools you actually use. For example, approving and
-categorizing transactions needs only `Ynab.UpdateTransactions`. Leave out the
-destructive tools unless you need them.
+Select only the write tools you actually use. For example, a gateway for approving and
+categorizing transactions needs just one tool:
+
+```text
+Ynab.UpdateTransactions
+```
+
+Add others from the inventory below only when you need them, and leave out the
+destructive ones unless you specifically need to delete.
+
+The write gateway doesn't need read tools. A client that has both gateways connected
+looks up IDs through the read gateway.
+
+### All write tools (inventory, not a recommendation)
+
+Every tool that can change YNAB, for reference when choosing. Don't select this whole
+list as a gateway.
 
 ```text
 Ynab.CreateTransaction
@@ -79,12 +105,12 @@ Ynab.UpdateScheduledTransaction
 Ynab.DeleteScheduledTransaction
 ```
 
-`Ynab.DeleteTransaction` and `Ynab.DeleteScheduledTransaction` are tagged
-`destructive=True`. `Ynab.MoveMoney` and the `Create` tools aren't idempotent: running
-them twice changes YNAB twice.
-
-The write gateway doesn't need read tools. A client that has both gateways connected
-looks up IDs through the read gateway.
+- `Ynab.DeleteTransaction` and `Ynab.DeleteScheduledTransaction` are tagged
+  `destructive=True`.
+- `Ynab.MoveMoney` and the `Create` tools other than `ImportTransactions` aren't
+  idempotent: running them twice changes YNAB twice (two transactions, or the money
+  moved twice). `Ynab.ImportTransactions` is tagged non-idempotent too, but a second
+  run only pulls transactions that arrived since the first.
 
 ## Require approval for writes in the client
 
@@ -93,8 +119,10 @@ that on for every tool from the write gateway. Check your client's current docs;
 example:
 
 - **Claude Code:** add the write gateway's server name to the `ask` permission list in
-  `.claude/settings.json` (or your user settings), so every tool from it prompts first,
-  and never add it to `allow`:
+  your **user** settings (`~/.claude/settings.json`), so every tool from it prompts first
+  in every directory you work in. A project's `.claude/settings.json` only applies inside
+  that project, so it isn't enough for a server you use everywhere. Never add the server
+  to `allow`:
 
   ```json
   {
@@ -105,6 +133,11 @@ example:
   ```
 
   Here `ynab-write` is whatever name you gave the server in your MCP config.
+
+  An `ask` rule only helps while prompts are shown. Permission modes that skip prompts
+  (`bypassPermissions`, `--dangerously-skip-permissions`) will run writes without
+  asking, so don't use them in a session with the write gateway connected. `dontAsk`
+  mode refuses the call instead of prompting, which is safe but means writes won't run.
 - **Claude apps (custom connectors):** set each write tool's permission to require
   approval rather than "always allow".
 - **Other clients:** turn off any "auto-run" or "always allow" setting for these tools.
