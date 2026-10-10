@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from arcade_mcp_server.metadata import ServiceDomain
 
 from arcade_ynab.server import app
@@ -95,3 +97,20 @@ def test_phase_2_tools_are_writes():
 def test_move_money_is_not_idempotent():
     move = next(d for d in _definitions() if d.name == "MoveMoney")
     assert move.metadata.behavior.idempotent is False
+
+
+def _documented_tools(heading: str) -> set[str]:
+    """The tool list in the first ```text block after ``heading`` in docs/GATEWAYS.md."""
+    doc = (Path(__file__).parents[1] / "docs" / "GATEWAYS.md").read_text()
+    section = doc.split(heading, 1)[1]
+    block = section.split("```text\n", 1)[1].split("```", 1)[0]
+    return {line.strip() for line in block.splitlines() if line.strip()}
+
+
+def test_gateway_docs_match_tool_metadata():
+    read = {str(d.fully_qualified_name) for d in _definitions() if d.metadata.behavior.read_only}
+    write = {str(d.fully_qualified_name) for d in _definitions()} - read
+
+    assert _documented_tools("### Read gateway") == read
+    assert _documented_tools("### All write tools") == write
+    assert _documented_tools("### Write gateway") <= write
