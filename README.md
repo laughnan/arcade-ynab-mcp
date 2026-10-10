@@ -99,6 +99,11 @@ Then add the server's tools to an MCP Gateway in the Arcade dashboard.
 Never commit tokens or personal budget data. Tests use invented data only. YNAB tokens
 are held by Arcade and injected per request; they are never exposed to the model.
 
+The server uses per-user OAuth only: it reads no secrets or environment variables, so a
+YNAB personal access token stored as an Arcade secret isn't used. To check a deployment
+matches this repository and its gateways are private, follow
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ## License
 
 [MIT](LICENSE)

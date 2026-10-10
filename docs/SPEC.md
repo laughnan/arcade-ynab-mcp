@@ -150,7 +150,9 @@ docs/
 These apply to every tool.
 
 1. **Auth.** Every tool uses `requires_auth=OAuth2(id="ynab")` and gets its token from
-   `context` (`context.get_auth_token_or_empty()`). No tool uses `requires_secrets`.
+   `context` (`context.get_auth_token_or_empty()`). No tool uses `requires_secrets`, and
+   the server reads no environment variables. [DEPLOYMENT.md](DEPLOYMENT.md) describes
+   how to check a deployment matches this.
 2. **Metadata.** Every tool declares `ToolMetadata`:
    - `Classification(service_domains=[ServiceDomain.FINANCIAL_DATA])`. This is the
      closest domain Arcade offers; it has no budgeting domain.
