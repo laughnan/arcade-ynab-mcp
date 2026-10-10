@@ -4,6 +4,7 @@ Every tool builds a client from its ``Context`` so the caller's OAuth token is u
 Non-2xx responses are translated into Arcade errors with messages a model can act on.
 """
 
+import re
 from typing import Any
 
 import httpx
@@ -17,6 +18,12 @@ from arcade_mcp_server.exceptions import (
 BASE_URL = "https://api.ynab.com/v1"
 TIMEOUT_SECONDS = 30.0
 DEFAULT_RETRY_AFTER_MS = 60_000
+
+# Every path segment must be a plain token: YNAB IDs are UUIDs (scheduled occurrences add
+# "_YYYY-MM-DD"), plan aliases are "last-used" and "default", and months are ISO dates.
+# Anything else (".", "..", "/", "?", "#", "%", whitespace) could change which endpoint is
+# called, for example a scheduled transaction ID of "../transactions/<id>".
+_SEGMENT_RE = re.compile(r"[A-Za-z0-9_-]+")
 
 # Overridden in tests with an httpx.MockTransport; None means real network access.
 TRANSPORT: httpx.AsyncBaseTransport | None = None
@@ -44,6 +51,7 @@ class YnabClient:
         With ``empty_on_404``, a 404 returns ``{}``. YNAB's list endpoints answer 404
         ("No transactions were found") when a collection is empty.
         """
+        _validate_path(path)
         clean_params = {k: v for k, v in (params or {}).items() if v is not None}
         async with httpx.AsyncClient(
             base_url=BASE_URL,
@@ -86,6 +94,29 @@ def client_from_context(context: Any) -> YnabClient:
             developer_message="Context had no OAuth token for provider 'ynab'.",
         )
     return YnabClient(token)
+
+
+def _validate_path(path: str) -> None:
+    """Reject a path whose segments could route the request to a different endpoint.
+
+    Tools build paths by interpolating caller-supplied IDs, so this runs before any
+    request is sent.
+    """
+    if not path.startswith("/"):
+        raise ToolExecutionError(
+            "Invalid YNAB request path.",
+            developer_message=f"Path must start with '/': {path!r}",
+        )
+    for segment in path[1:].split("/"):
+        if not _SEGMENT_RE.fullmatch(segment):
+            raise RetryableToolError(
+                f"Invalid ID {segment!r}.",
+                developer_message=f"Rejected path segment {segment!r} in {path!r}",
+                additional_prompt_content=(
+                    "IDs contain only letters, digits, '-' and '_'. Use the List tools to "
+                    "find valid IDs, then retry."
+                ),
+            )
 
 
 def _error_details(response: httpx.Response) -> tuple[str, str, str]:
