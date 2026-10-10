@@ -19,6 +19,7 @@ from arcade_ynab.tools._common import (
     Month,
     PlanId,
     normalize_month,
+    path_id,
     plan_path,
     require_date,
     require_positive,
@@ -53,7 +54,10 @@ async def get_category(
 ) -> Annotated[dict, "One category's assigned, activity, available and goal for a month"]:
     """Get a single category's amounts and goal progress for a given month."""
     data = await client_from_context(context).get(
-        plan_path(plan_id, f"/months/{normalize_month(month)}/categories/{category_id}")
+        plan_path(
+            plan_id,
+            f"/months/{normalize_month(month)}/categories/{path_id(category_id, 'category_id')}",
+        )
     )
     return shaping.category(data["category"])
 
@@ -123,7 +127,10 @@ async def assign_to_category(
     """Set how much is assigned to a category for a month. The difference comes from, or
     goes back to, Ready to Assign."""
     data = await client_from_context(context).patch(
-        plan_path(plan_id, f"/months/{normalize_month(month)}/categories/{category_id}"),
+        plan_path(
+            plan_id,
+            f"/months/{normalize_month(month)}/categories/{path_id(category_id, 'category_id')}",
+        ),
         {"category": {"budgeted": to_milliunits(amount)}},
     )
     return shaping.category(data["category"])
@@ -281,7 +288,7 @@ async def update_category(
             additional_prompt_content="Pass at least one field to change.",
         )
     data = await client_from_context(context).patch(
-        plan_path(plan_id, f"/categories/{category_id}"), {"category": body}
+        plan_path(plan_id, f"/categories/{path_id(category_id, 'category_id')}"), {"category": body}
     )
     return shaping.category(data["category"])
 
@@ -319,7 +326,7 @@ async def update_category_group(
 ) -> Annotated[dict, "The renamed category group"]:
     """Rename a category group."""
     data = await client_from_context(context).patch(
-        plan_path(plan_id, f"/category_groups/{category_group_id}"),
+        plan_path(plan_id, f"/category_groups/{path_id(category_group_id, 'category_group_id')}"),
         {"category_group": {"name": _category_group_name(name)}},
     )
     return shaping.category_group(data["category_group"], include_hidden=True)

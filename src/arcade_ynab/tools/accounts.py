@@ -14,6 +14,7 @@ from arcade_ynab.tools._common import (
     READ_ONLY,
     YNAB_AUTH,
     PlanId,
+    path_id,
     plan_path,
 )
 
@@ -53,7 +54,9 @@ async def get_account(
     plan_id: PlanId = DEFAULT_PLAN,
 ) -> Annotated[dict, "One account with type, budget status and balances"]:
     """Get a single account by ID."""
-    data = await client_from_context(context).get(plan_path(plan_id, f"/accounts/{account_id}"))
+    data = await client_from_context(context).get(
+        plan_path(plan_id, f"/accounts/{path_id(account_id, 'account_id')}")
+    )
     return shaping.account(data["account"])
 
 

@@ -24,6 +24,7 @@ from arcade_ynab.tools._common import (
     flag_value,
     is_schedulable,
     nullable,
+    path_id,
     plan_path,
     require_schedulable_date,
     transfer_target,
@@ -211,7 +212,8 @@ async def update_scheduled_transaction(
     next_date = require_schedulable_date(date, "date") if date else None
 
     client = client_from_context(context)
-    path = plan_path(plan_id, f"/scheduled_transactions/{scheduled_transaction_id}")
+    scheduled_id = path_id(scheduled_transaction_id, "scheduled_transaction_id")
+    path = plan_path(plan_id, f"/scheduled_transactions/{scheduled_id}")
     current = (await client.get(path))["scheduled_transaction"]
     if next_date is None:
         if not is_schedulable(current["date_next"]):
@@ -257,8 +259,9 @@ async def delete_scheduled_transaction(
 ) -> Annotated[dict, "The deleted scheduled transaction"]:
     """Permanently delete a scheduled transaction. Only call this when the user has clearly
     asked to delete this specific scheduled transaction."""
+    scheduled_id = path_id(scheduled_transaction_id, "scheduled_transaction_id")
     data = await client_from_context(context).delete(
-        plan_path(plan_id, f"/scheduled_transactions/{scheduled_transaction_id}")
+        plan_path(plan_id, f"/scheduled_transactions/{scheduled_id}")
     )
     return {
         "deleted": True,

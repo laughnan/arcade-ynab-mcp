@@ -16,7 +16,7 @@ from arcade_mcp_server.metadata import (
     ToolMetadata,
 )
 
-from arcade_ynab.client import YnabClient
+from arcade_ynab.client import SAFE_SEGMENT, YnabClient
 
 # Custom OAuth 2.0 provider configured in the Arcade dashboard (see docs/SPEC.md).
 # No scopes: YNAB grants full access unless "read-only" is requested.
@@ -96,8 +96,25 @@ Limit = Annotated[int, f"Maximum number of results to return (1-{MAX_LIMIT})."]
 _MONTH_RE = re.compile(r"^(\d{4})-(\d{2})(?:-\d{2})?$")
 
 
+def path_id(value: str, name: str) -> str:
+    """Return ``value`` if it is safe to put in a URL path as a single segment.
+
+    Call this on every caller-supplied ID before interpolating it into a path, so that an
+    ID can't add segments ("<id>/transactions") or climb out of its resource ("../x").
+    """
+    if not SAFE_SEGMENT.fullmatch(value or ""):
+        raise RetryableToolError(
+            f"Invalid {name} {value!r}.",
+            additional_prompt_content=(
+                f"{name} contains only letters, digits, '-' and '_'. Use the List tools to "
+                "find valid IDs, then retry."
+            ),
+        )
+    return value
+
+
 def plan_path(plan_id: str, suffix: str = "") -> str:
-    return f"/plans/{plan_id or DEFAULT_PLAN}{suffix}"
+    return f"/plans/{path_id(plan_id or DEFAULT_PLAN, 'plan_id')}{suffix}"
 
 
 def normalize_month(value: str) -> str:
@@ -154,7 +171,7 @@ class TransferTarget:
 
 async def transfer_target(client: YnabClient, plan_id: str, account_id: str) -> TransferTarget:
     """Look up the payee that represents a transfer into ``account_id``."""
-    data = await client.get(plan_path(plan_id, f"/accounts/{account_id}"))
+    data = await client.get(plan_path(plan_id, f"/accounts/{path_id(account_id, 'account_id')}"))
     account = data["account"]
     payee_id = account.get("transfer_payee_id")
     if not payee_id:

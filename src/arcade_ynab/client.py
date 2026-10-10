@@ -19,11 +19,13 @@ BASE_URL = "https://api.ynab.com/v1"
 TIMEOUT_SECONDS = 30.0
 DEFAULT_RETRY_AFTER_MS = 60_000
 
-# Every path segment must be a plain token: YNAB IDs are UUIDs (scheduled occurrences add
-# "_YYYY-MM-DD"), plan aliases are "last-used" and "default", and months are ISO dates.
-# Anything else (".", "..", "/", "?", "#", "%", whitespace) could change which endpoint is
-# called, for example a scheduled transaction ID of "../transactions/<id>".
-_SEGMENT_RE = re.compile(r"[A-Za-z0-9_-]+")
+# A safe path segment: YNAB IDs are UUIDs (scheduled occurrences add "_YYYY-MM-DD"), plan
+# aliases are "last-used" and "default", and months are ISO dates. Anything else (".",
+# "..", "?", "#", "%", whitespace) could change which endpoint is called, for example a
+# scheduled transaction ID of "../transactions/<id>". Tools also check each ID with
+# ``tools._common.path_id`` before building a path, because an ID containing "/" (such as
+# "<id>/transactions") would otherwise pass as extra, individually valid segments.
+SAFE_SEGMENT = re.compile(r"[A-Za-z0-9_-]+")
 
 # Overridden in tests with an httpx.MockTransport; None means real network access.
 TRANSPORT: httpx.AsyncBaseTransport | None = None
@@ -99,8 +101,8 @@ def client_from_context(context: Any) -> YnabClient:
 def _validate_path(path: str) -> None:
     """Reject a path whose segments could route the request to a different endpoint.
 
-    Tools build paths by interpolating caller-supplied IDs, so this runs before any
-    request is sent.
+    A backstop for ``path_id``: it runs before any request is sent, but can't tell an ID
+    that smuggles in extra "/"-separated segments from a legitimately longer path.
     """
     if not path.startswith("/"):
         raise ToolExecutionError(
@@ -108,7 +110,7 @@ def _validate_path(path: str) -> None:
             developer_message=f"Path must start with '/': {path!r}",
         )
     for segment in path[1:].split("/"):
-        if not _SEGMENT_RE.fullmatch(segment):
+        if not SAFE_SEGMENT.fullmatch(segment):
             raise RetryableToolError(
                 f"Invalid ID {segment!r}.",
                 developer_message=f"Rejected path segment {segment!r} in {path!r}",
