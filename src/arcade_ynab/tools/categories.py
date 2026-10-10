@@ -1,6 +1,8 @@
 """Category tools."""
 
 import asyncio
+import hashlib
+import weakref
 from dataclasses import dataclass
 from enum import Enum
 from typing import Annotated, Any
@@ -137,14 +139,22 @@ async def assign_to_category(
     return shaping.category(data["category"])
 
 
-# Serializes overlapping MoveMoney calls for a plan within this worker. It can't cover
-# other workers or edits made in YNAB itself, so each write is also checked against the
-# amount read beforehand (see move_money's docstring for the guarantees).
-_MOVE_LOCKS: dict[str, asyncio.Lock] = {}
+# Serializes overlapping MoveMoney calls by the same user within this worker. Keyed by
+# user rather than plan, so that "last-used", "default" and a plan's ID share a lock and
+# one user's slow move never blocks another user. Entries go away once no call holds
+# them. It can't cover other workers or edits made in YNAB itself; for those, each
+# write is computed from a read made just before it (the month read for the first
+# write, a fresh category read for the second), and the second write stops if the
+# destination changed.
+_MOVE_LOCKS: "weakref.WeakValueDictionary[str, asyncio.Lock]" = weakref.WeakValueDictionary()
 
 
-def _move_lock(plan_id: str) -> asyncio.Lock:
-    return _MOVE_LOCKS.setdefault(plan_id or DEFAULT_PLAN, asyncio.Lock())
+def _move_lock(token: str) -> asyncio.Lock:
+    key = hashlib.sha256(token.encode()).hexdigest()
+    lock = _MOVE_LOCKS.get(key)
+    if lock is None:
+        lock = _MOVE_LOCKS[key] = asyncio.Lock()
+    return lock
 
 
 def _is_uncertain(error: BaseException) -> bool:
@@ -249,9 +259,10 @@ async def move_money(
             additional_prompt_content="Pick two different categories.",
         )
 
-    async with _move_lock(plan_id):
+    client = client_from_context(context)
+    async with _move_lock(context.get_auth_token_or_empty()):
         return await _move_money(
-            client_from_context(context),
+            client,
             amount,
             from_category_id,
             to_category_id,

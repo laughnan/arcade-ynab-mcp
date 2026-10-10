@@ -264,8 +264,11 @@ YNAB has no "move money" endpoint and no conditional writes (no ETags or version
 checks on category updates), so `MoveMoney` reads the month and then writes absolute
 assigned amounts. What it guarantees, and what it doesn't:
 
-- **Overlapping calls in one worker are serialized** per `plan_id` with an in-process
-  lock, so two moves sent at once can't both compute from the same totals.
+- **Overlapping calls in one worker are serialized** per user with an in-process lock,
+  so two moves sent at once can't both compute from the same totals, whichever way they
+  name the plan (`last-used`, `default` or its ID). Different users don't share a lock.
+- **Each write is computed from a read made just before it:** the month read for the
+  first write, and a fresh read of the destination for the second.
 - **No cross-worker lock.** Arcade Cloud may run more than one worker, and the server
   keeps no shared state, so moves handled by different workers aren't serialized.
   Edits made in YNAB itself can also land at any time.

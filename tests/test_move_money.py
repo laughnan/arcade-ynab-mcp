@@ -191,3 +191,20 @@ async def test_moving_from_ready_to_assign_skips_the_extra_read(fake, context, m
     await move(context, 10, None, "cat-groceries")
 
     assert seen == ["GET ", "PATCH /categories/cat-groceries"]
+
+
+def test_lock_is_per_user_not_per_plan_alias():
+    lock = categories._move_lock("token-a")
+
+    assert categories._move_lock("token-a") is lock
+    assert categories._move_lock("token-b") is not lock
+
+
+async def test_one_users_move_does_not_block_another(fake, context):
+    other_user = type(context)(get_auth_token_or_empty=lambda: "other-token")
+
+    async with categories._move_lock("test-token"):
+        # The first user's lock is held; the other user's move still completes.
+        await asyncio.wait_for(move(other_user, 10, "cat-fun", "cat-groceries"), timeout=1)
+
+    assert fake.budgeted["cat-fun"] == 90000
