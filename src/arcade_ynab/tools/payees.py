@@ -16,6 +16,7 @@ from arcade_ynab.tools._common import (
     Limit,
     PlanId,
     clamp_limit,
+    path_id,
     plan_path,
 )
 
@@ -67,6 +68,6 @@ async def update_payee(
 ) -> Annotated[dict, "The renamed payee"]:
     """Rename a payee. The new name shows on all of its transactions."""
     data = await client_from_context(context).patch(
-        plan_path(plan_id, f"/payees/{payee_id}"), {"payee": {"name": name}}
+        plan_path(plan_id, f"/payees/{path_id(payee_id, 'payee_id')}"), {"payee": {"name": name}}
     )
     return shaping.payee(data["payee"])

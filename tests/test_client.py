@@ -8,6 +8,7 @@ from arcade_mcp_server.exceptions import (
     UpstreamRateLimitError,
 )
 
+from arcade_ynab import client as client_module
 from arcade_ynab.client import YnabClient, client_from_context
 
 
@@ -92,3 +93,46 @@ async def test_html_error_body(ynab, monkeypatch):
 
     with pytest.raises(UpstreamError, match=r"\(502\)"):
         await YnabClient("t").get("/user")
+
+
+@pytest.mark.parametrize(
+    "bad_id",
+    [
+        "../transactions/txn-1",
+        "..",
+        ".",
+        "sch-1/../../transactions/txn-1",
+        "%2e%2e",
+        "%2E%2E%2Ftransactions",
+        "sch-1?x=1",
+        "sch-1#frag",
+        "sch-1\\..\\x",
+        "sch 1",
+        "",
+    ],
+)
+async def test_rejects_unsafe_path_ids_before_sending(ynab, bad_id):
+    with pytest.raises(RetryableToolError, match="Invalid ID"):
+        await YnabClient("t").delete(f"/plans/last-used/scheduled_transactions/{bad_id}")
+
+    assert ynab.requests == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/plans/last-used/scheduled_transactions/0d4f7e3c-1a2b-4c5d-8e9f-0123456789ab",
+        "/plans/default/months/2026-10-01/categories/cat-groceries",
+        "/plans/last-used/transactions/0d4f7e3c-1a2b-4c5d-8e9f-0123456789ab_2026-11-01",
+    ],
+)
+async def test_accepts_valid_paths(ynab, path):
+    ynab.add("GET", path, {"ok": True})
+
+    assert await YnabClient("t").get(path) == {"ok": True}
+    assert ynab.last.url.path == "/v1" + path
+
+
+def test_rejects_relative_path():
+    with pytest.raises(ToolExecutionError, match="Invalid YNAB request path"):
+        client_module._validate_path("plans/last-used")

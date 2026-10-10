@@ -25,6 +25,7 @@ from arcade_ynab.tools._common import (
     clamp_limit,
     flag_value,
     nullable,
+    path_id,
     plan_path,
     require_date,
     transfer_target,
@@ -78,7 +79,7 @@ async def list_transactions(
     suffix = "/transactions"
     if chosen:
         resource, resource_id = next(iter(chosen.items()))
-        suffix = f"/{resource}/{resource_id}/transactions"
+        suffix = f"/{resource}/{path_id(resource_id, 'filter ID')}/transactions"
 
     data = await client_from_context(context).get_list(
         plan_path(plan_id, suffix),
@@ -103,7 +104,7 @@ async def get_transaction(
 ) -> Annotated[dict, "One transaction, including any split lines"]:
     """Get a single transaction by ID, including its subtransactions if it is a split."""
     data = await client_from_context(context).get(
-        plan_path(plan_id, f"/transactions/{transaction_id}")
+        plan_path(plan_id, f"/transactions/{path_id(transaction_id, 'transaction_id')}")
     )
     return shaping.transaction(data["transaction"])
 
@@ -313,7 +314,7 @@ async def delete_transaction(
     """Permanently delete one transaction. Only call this when the user has clearly asked to
     delete this specific transaction."""
     data = await client_from_context(context).delete(
-        plan_path(plan_id, f"/transactions/{transaction_id}")
+        plan_path(plan_id, f"/transactions/{path_id(transaction_id, 'transaction_id')}")
     )
     return {"deleted": True, "transaction": shaping.transaction(data["transaction"])}
 
