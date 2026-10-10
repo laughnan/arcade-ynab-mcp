@@ -250,13 +250,39 @@ month variants)
 | `DeleteTransaction` | `DELETE /transactions/{id}` | delete, destructive |
 | `ImportTransactions` | `POST /transactions/import` | create. Pulls new transactions from linked accounts |
 | `AssignToCategory` | `PATCH /months/{month}/categories/{id}` | update, idempotent. Sets the assigned amount for a month |
-| `MoveMoney` | one month GET + up to two category PATCHes | update, not idempotent. Moves an amount between categories, or to and from Ready to Assign. The source must have at least that much available. Not atomic: it takes money out of the source first, so if the second write fails, the money is left in Ready to Assign and the error says so |
+| `MoveMoney` | one month GET + up to two category PATCHes (plus a category GET before the second write, and after an uncertain write) | update, not idempotent. Moves an amount between categories, or to and from Ready to Assign. The source must have at least that much available. Not atomic; see [MoveMoney guarantees](#movemoney-guarantees) |
 | `CreateCategory` / `UpdateCategory` | `POST` / `PATCH /categories` | create / update. Name, note, group, target (amount, date, repeat frequency, set-aside vs refill). YNAB's API can't hide or unhide categories |
 | `CreateCategoryGroup` / `UpdateCategoryGroup` | `POST` / `PATCH /category_groups` | create / update |
 | `CreatePayee` / `UpdatePayee` | `POST` / `PATCH /payees` | create / update (rename) |
 | `CreateAccount` | `POST /accounts` | create. Name, type, starting balance |
 | `CreateScheduledTransaction` / `UpdateScheduledTransaction` | `POST` / `PUT /scheduled_transactions` | create / update. YNAB replaces the whole object on `PUT`, so the update reads the current values first and changes only the fields passed. Dates must be in the future (within 5 years); if the next occurrence is today or past, the caller must pass a new date |
 | `DeleteScheduledTransaction` | `DELETE /scheduled_transactions/{id}` | delete, destructive |
+
+#### MoveMoney guarantees
+
+YNAB has no "move money" endpoint and no conditional writes (no ETags or version
+checks on category updates), so `MoveMoney` reads the month and then writes absolute
+assigned amounts. What it guarantees, and what it doesn't:
+
+- **Overlapping calls in one worker are serialized** per user with an in-process lock,
+  so two moves sent at once can't both compute from the same totals, whichever way they
+  name the plan (`last-used`, `default` or its ID). Different users don't share a lock.
+- **Each write is computed from a read made just before it:** the month read for the
+  first write, and a fresh read of the destination for the second.
+- **No cross-worker lock.** Arcade Cloud may run more than one worker, and the server
+  keeps no shared state, so moves handled by different workers aren't serialized.
+  Edits made in YNAB itself can also land at any time.
+- **Conflict detection before the second write.** Before updating the destination, it
+  re-reads the destination's assigned amount and stops if it changed since the move
+  started. The error says the money is in Ready to Assign. There's still a short window
+  between that read and the write that YNAB's API gives no way to close.
+- **Second-step failure.** If the destination write fails, the money stays in Ready to
+  Assign and the error says how to finish with `AssignToCategory`.
+- **Uncertain outcomes.** After a timeout, lost connection or 5xx, it re-reads the
+  category. If the new amount is there, it carries on; if the old amount is there, it
+  reports the failure; otherwise it says the outcome couldn't be confirmed, names the
+  category and its previous amount, and tells the model not to run `MoveMoney` again
+  until it has checked (a retry would move the money twice).
 
 ### Phase 3: Composite and analysis tools
 

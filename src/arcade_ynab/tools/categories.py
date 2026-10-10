@@ -1,13 +1,23 @@
 """Category tools."""
 
+import asyncio
+import hashlib
+import weakref
+from dataclasses import dataclass
 from enum import Enum
 from typing import Annotated, Any
 
+import httpx
 from arcade_mcp_server import Context, tool
-from arcade_mcp_server.exceptions import RetryableToolError, ToolExecutionError, ToolRuntimeError
+from arcade_mcp_server.exceptions import (
+    RetryableToolError,
+    ToolExecutionError,
+    ToolRuntimeError,
+    UpstreamError,
+)
 
 from arcade_ynab import shaping
-from arcade_ynab.client import client_from_context
+from arcade_ynab.client import YnabClient, client_from_context
 from arcade_ynab.money import from_milliunits, to_milliunits
 from arcade_ynab.tools._common import (
     CREATES,
@@ -129,6 +139,90 @@ async def assign_to_category(
     return shaping.category(data["category"])
 
 
+# Serializes overlapping MoveMoney calls by the same user within this worker. Keyed by
+# user rather than plan, so that "last-used", "default" and a plan's ID share a lock and
+# one user's slow move never blocks another user. Entries go away once no call holds
+# them. It can't cover other workers or edits made in YNAB itself; for those, each
+# write is computed from a read made just before it (the month read for the first
+# write, a fresh category read for the second), and the second write stops if the
+# destination changed.
+_MOVE_LOCKS: "weakref.WeakValueDictionary[str, asyncio.Lock]" = weakref.WeakValueDictionary()
+
+
+def _move_lock(token: str) -> asyncio.Lock:
+    key = hashlib.sha256(token.encode()).hexdigest()
+    lock = _MOVE_LOCKS.get(key)
+    if lock is None:
+        lock = _MOVE_LOCKS[key] = asyncio.Lock()
+    return lock
+
+
+def _is_uncertain(error: BaseException) -> bool:
+    """True if a failed write may still have been applied by YNAB.
+
+    Network errors and timeouts can lose the response to a write that succeeded, and a
+    5xx doesn't say whether the change was saved. 4xx responses (including 429) mean the
+    write was refused.
+    """
+    if isinstance(error, httpx.TransportError):
+        return True
+    return isinstance(error, UpstreamError) and (error.status_code or 0) >= 500
+
+
+class _MoveConflict(Exception):
+    """A category's assigned amount changed after MoveMoney read it."""
+
+
+class _MoveUncertain(Exception):
+    """It's unknown whether a category write was applied."""
+
+
+@dataclass
+class _CategoryWriter:
+    client: YnabClient
+    plan_id: str
+    month_key: str
+
+    def _path(self, category_id: str) -> str:
+        return plan_path(self.plan_id, f"/months/{self.month_key}/categories/{category_id}")
+
+    async def read(self, category_id: str) -> dict[str, Any]:
+        data = await self.client.get(self._path(category_id))
+        return dict(data["category"])
+
+    async def check_unchanged(self, category_id: str, expected: int) -> None:
+        if (await self.read(category_id))["budgeted"] != expected:
+            raise _MoveConflict
+
+    async def set(self, category_id: str, before: int, after: int) -> dict[str, Any]:
+        """Set the assigned amount from ``before`` to ``after``.
+
+        If the response is lost or YNAB fails with a 5xx, re-read the category to find
+        out whether the write landed instead of assuming either outcome.
+        """
+        try:
+            saved = await self.client.patch(
+                self._path(category_id), {"category": {"budgeted": after}}
+            )
+        except (httpx.TransportError, ToolRuntimeError) as e:
+            if not _is_uncertain(e):
+                raise
+            try:
+                current = await self.read(category_id)
+            except (httpx.TransportError, ToolRuntimeError):
+                raise _MoveUncertain from e
+            if current["budgeted"] == after:
+                return shaping.category(current)
+            if current["budgeted"] == before:
+                raise
+            raise _MoveUncertain from e
+        return shaping.category(saved["category"])
+
+
+def _display_name(name: str | None) -> str:
+    return f"'{name}'" if name else "the category"
+
+
 @tool(requires_auth=YNAB_AUTH, metadata=UPDATES_NOT_IDEMPOTENT)
 async def move_money(
     context: Context,
@@ -143,11 +237,16 @@ async def move_money(
     plan_id: PlanId = DEFAULT_PLAN,
 ) -> Annotated[dict, "Both categories after the move"]:
     """Move money between two categories, or between a category and Ready to Assign, by
-    adjusting their assigned amounts for the month. Running it twice moves the money twice.
+    adjusting their assigned amounts for the month. Running it twice moves the money twice,
+    so never retry it after an error without checking the categories first (GetCategory).
 
-    The source must have at least the amount available. YNAB has no single "move" call,
-    so this updates the source first and then the destination. If the second step fails,
-    the money is left in Ready to Assign and the error says so."""
+    The source must have at least the amount available. YNAB has no single "move" call
+    and no way to make a write conditional, so this is not atomic: it updates the source
+    first and then the destination. Before the second write it re-reads the destination
+    and stops if its assigned amount changed since the move started (an edit in YNAB or
+    another tool call). If the second step fails, the money is left in Ready to Assign
+    and the error says so. If a write's outcome can't be confirmed, the error says which
+    category to check."""
     require_positive(amount, "amount")
     if not from_category_id and not to_category_id:
         raise RetryableToolError(
@@ -161,7 +260,31 @@ async def move_money(
         )
 
     client = client_from_context(context)
-    month_key = normalize_month(month)
+    async with _move_lock(context.get_auth_token_or_empty()):
+        return await _move_money(
+            client,
+            amount,
+            from_category_id,
+            to_category_id,
+            normalize_month(month),
+            plan_id,
+        )
+
+
+_DONT_REPEAT = (
+    "Don't run MoveMoney again until you've checked the categories with GetCategory, or "
+    "the money may move twice."
+)
+
+
+async def _move_money(
+    client: YnabClient,
+    amount: float,
+    from_category_id: str | None,
+    to_category_id: str | None,
+    month_key: str,
+    plan_id: str,
+) -> dict[str, Any]:
     data = await client.get(plan_path(plan_id, f"/months/{month_key}"))
     by_id = {c["id"]: c for c in shaping.live(data["month"].get("categories"))}
     for category_id in (from_category_id, to_category_id):
@@ -183,36 +306,86 @@ async def move_money(
                 ),
             )
     result: dict[str, Any] = {"month": data["month"].get("month"), "amount": amount}
-
-    async def set_assigned(category_id: str, budgeted: int) -> dict[str, Any]:
-        saved = await client.patch(
-            plan_path(plan_id, f"/months/{month_key}/categories/{category_id}"),
-            {"category": {"budgeted": budgeted}},
-        )
-        return shaping.category(saved["category"])
+    writer = _CategoryWriter(client, plan_id, month_key)
+    moved = from_milliunits(milliunits)
 
     if from_category_id:
         source = by_id[from_category_id]
-        result["from"] = await set_assigned(from_category_id, source["budgeted"] - milliunits)
+        before = source["budgeted"]
+        try:
+            result["from"] = await writer.set(from_category_id, before, before - milliunits)
+        except _MoveUncertain as e:
+            raise ToolExecutionError(
+                f"Couldn't confirm whether {moved} was taken out of "
+                f"{_display_name(source.get('name'))} ({from_category_id}); nothing "
+                f"was added to the destination. Its assigned amount was "
+                f"{from_milliunits(before)}. {_DONT_REPEAT}",
+                developer_message=_developer_message(e),
+            ) from e
     else:
         result["from"] = "Ready to Assign"
 
-    if to_category_id:
-        target = by_id[to_category_id]
-        try:
-            result["to"] = await set_assigned(to_category_id, target["budgeted"] + milliunits)
-        except ToolRuntimeError as e:
-            if not from_category_id:
-                raise
-            raise ToolExecutionError(
-                f"Took {from_milliunits(milliunits)} out of '{source.get('name')}', but adding "
-                f"it to '{target.get('name')}' failed ({e.message}). The money is now in Ready "
-                "to Assign; use AssignToCategory to finish the move.",
-                developer_message=e.developer_message,
-            ) from e
-    else:
+    if not to_category_id:
         result["to"] = "Ready to Assign"
+        return result
+
+    target = by_id[to_category_id]
+    before = target["budgeted"]
+    target_name = _display_name(target.get("name"))
+    if from_category_id:
+        source_name = _display_name(by_id[from_category_id].get("name"))
+        left_in_rta = (
+            f"Took {moved} out of {source_name}, but it was not added to {target_name}. "
+            "The money is now in Ready to Assign"
+        )
+    else:
+        left_in_rta = ""
+
+    try:
+        if from_category_id:
+            await writer.check_unchanged(to_category_id, before)
+        result["to"] = await writer.set(to_category_id, before, before + milliunits)
+    except _MoveConflict as e:
+        raise ToolExecutionError(
+            f"{left_in_rta}: {target_name}'s assigned amount changed while the move was "
+            "running (an edit in YNAB or another tool call). Check it with GetCategory, "
+            "then use AssignToCategory to finish the move if it's still wanted.",
+            developer_message=f"{to_category_id} budgeted no longer {before}",
+        ) from e
+    except _MoveUncertain as e:
+        prefix = (
+            f"Took {moved} out of {source_name}, but couldn't confirm"
+            if from_category_id
+            else "Couldn't confirm"
+        )
+        raise ToolExecutionError(
+            f"{prefix} whether {moved} was added to {target_name} ({to_category_id}). Its "
+            f"assigned amount was {from_milliunits(before)}. {_DONT_REPEAT}",
+            developer_message=_developer_message(e),
+        ) from e
+    except ToolRuntimeError as e:
+        if not from_category_id:
+            raise
+        raise ToolExecutionError(
+            f"{left_in_rta} ({e.message}). Use AssignToCategory to finish the move.",
+            developer_message=e.developer_message,
+        ) from e
+    except httpx.TransportError as e:
+        if not from_category_id:
+            raise
+        raise ToolExecutionError(
+            f"{left_in_rta} (couldn't reach YNAB). Check {target_name} with GetCategory, "
+            "then use AssignToCategory to finish the move.",
+            developer_message=repr(e),
+        ) from e
     return result
+
+
+def _developer_message(error: BaseException) -> str:
+    cause = error.__cause__
+    if isinstance(cause, ToolRuntimeError) and cause.developer_message:
+        return cause.developer_message
+    return repr(cause or error)
 
 
 @tool(requires_auth=YNAB_AUTH, metadata=CREATES)

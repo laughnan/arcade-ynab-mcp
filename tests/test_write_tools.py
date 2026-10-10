@@ -251,6 +251,11 @@ async def test_move_money_between_categories(ynab, context):
         {"category": make_category(id="cat-fun", budgeted=75000)},
     )
     ynab.add(
+        "GET",
+        f"{PLAN}/months/current/categories/cat-groceries",
+        {"category": make_category(budgeted=500000)},
+    )
+    ynab.add(
         "PATCH",
         f"{PLAN}/months/current/categories/cat-groceries",
         {"category": make_category(budgeted=525000)},
@@ -299,6 +304,11 @@ async def test_move_money_partial_failure_explains_state(ynab, context):
         "PATCH",
         f"{PLAN}/months/current/categories/cat-fun",
         {"category": make_category(id="cat-fun", budgeted=75000)},
+    )
+    ynab.add(
+        "GET",
+        f"{PLAN}/months/current/categories/cat-groceries",
+        {"category": make_category(budgeted=500000)},
     )
     ynab.error(
         "PATCH", f"{PLAN}/months/current/categories/cat-groceries", 500, "500", "server error"
@@ -604,6 +614,11 @@ async def test_move_money_checks_source_available(ynab, context):
         "PATCH",
         f"{PLAN}/months/current/categories/cat-fun",
         {"category": make_category(id="cat-fun", budgeted=-80000, balance=0)},
+    )
+    ynab.add(
+        "GET",
+        f"{PLAN}/months/current/categories/cat-groceries",
+        {"category": make_category(budgeted=500000)},
     )
     ynab.add(
         "PATCH",
