@@ -1,4 +1,5 @@
-# Secrets: never commit real tokens. Use .env locally, `arcade secret set` for deploys.
+# Secrets: never commit real tokens. The server needs none (per-user OAuth; see
+# docs/DEPLOYMENT.md), so there is nothing to `arcade secret set` for deploys.
 .env
 .env.*
 !.env.example

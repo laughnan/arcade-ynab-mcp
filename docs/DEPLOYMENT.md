@@ -33,19 +33,22 @@ arcade server list            # deployed servers, versions and status
 arcade server logs ynab       # startup logs show the registered tools
 ```
 
+Don't redeploy yet: that would replace what's running before you know what it is.
+
 - The server name is `ynab` and its version comes from `server.py` (`MCPApp(version=...)`)
-  and `pyproject.toml`. Check both match the commit you think is deployed.
-- Arcade doesn't record a git commit. To know exactly what's running, deploy from a
-  clean checkout of a known commit and note the commit next to the version:
+  and `pyproject.toml`. Note the deployed version and find the commits that carry it.
+- Check the logs list the same tools as `tests/test_server.py` and nothing else. The
+  scaffold's sample tools (`greet`, `whisper_secret`, `star_repo`) or any tool not in
+  this repository mean the deployment isn't this code.
+- Arcade doesn't record a git commit, so a version alone can't pin the exact revision.
+  Only after steps 2 to 4 (so a different deployment can still be inspected), redeploy
+  from a clean checkout of a known commit and note the commit next to the version:
 
   ```bash
   git status --porcelain       # must be empty
   git rev-parse HEAD
   arcade deploy -e src/arcade_ynab/server.py
   ```
-
-- Check the logs list the same tools as `tests/test_server.py` and nothing else (for
-  example, none of the scaffold's sample tools).
 
 ## 2. Identify the credential mechanism
 
@@ -58,8 +61,12 @@ arcade secret list            # names only; never print or copy values
   provider, which is configured in the dashboard, not as a tool secret.
 - In the dashboard, open **Connected apps** and check the custom provider `ynab` exists,
   with the settings in [SPEC.md](SPEC.md#setup-one-time-done-by-the-maintainer-in-each-services-ui).
-- When you call a tool for the first time, you should be sent through YNAB's sign-in and
-  consent screen. If tools work without that, a different credential path is in use.
+- Arcade stores and refreshes each user's YNAB token after their first consent, so an
+  already-connected account calling tools with no new YNAB screen is expected. The
+  useful check is a user who has never connected YNAB through the `ynab` provider (or
+  one whose connection you've removed in the dashboard): their first tool call must
+  send them through YNAB's sign-in and consent. If such a user's call succeeds without
+  it, a different credential path is in use.
 
 If a YNAB personal access token is stored as a secret:
 
@@ -76,28 +83,39 @@ If a YNAB personal access token is stored as a secret:
 For each gateway in the Arcade dashboard:
 
 - **Auth mode** is **Arcade Auth**, so only signed-in members of the Arcade project can
-  use it.
+  use it. **Arcade Headers** mode fails this check: anyone holding the project API key
+  can call tools as any user ID they choose, which uses that user's stored YNAB token.
+  That is a shared credential, just on the Arcade side, and step 4's request can't
+  detect it (it's rejected without the key too), so only this dashboard check catches
+  it.
 - **Project members** are only the people who should reach your YNAB data (for a
   personal setup, only you). Remove anyone else.
-- **Selected tools** match the lists in [GATEWAYS.md](GATEWAYS.md) (if present) or the
-  set you intend; check no write tools are in a read-only gateway.
+- **Selected tools** are the set you intend. A gateway meant to be read-only must contain
+  only tools tagged `read_only` (the `Get`, `List` and Phase 3 summary tools in the
+  README), and none of the write tools.
 
 ## 4. Check unauthenticated requests are rejected
 
 Use a request that changes nothing. Listing tools is read-only:
 
 ```bash
-curl -sS -o /dev/null -w '%{http_code}\n' \
+curl -sS -i \
   -X POST "https://api.arcade.dev/mcp/<gateway-slug>" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-Expect `401` (or `403`). A `200` with a tool list means anyone with the URL can see,
-and probably call, the tools: switch the gateway to Arcade Auth before doing anything
-else. A health or status endpoint answering without auth isn't evidence either way;
-only tool listing and tool calls matter.
+Read both the status and the body:
+
+| Result | Meaning |
+|---|---|
+| `401` or `403` | Pass: unauthenticated callers are rejected. |
+| `200` whose body has a `result` with a `tools` array | **Fail:** anyone with the URL can list, and probably call, the tools. Switch the gateway to Arcade Auth before doing anything else. |
+| `200` with a JSON-RPC `error`, or `400`/`406`, or anything else | Inconclusive. MCP over HTTP can answer protocol errors (for example "initialize first") with `200`. Retry with an MCP client such as the MCP Inspector while signed out, and check it can't list tools. |
+
+A health or status endpoint answering without auth isn't evidence either way; only tool
+listing and tool calls matter.
 
 ## Recording the result
 
